@@ -7,7 +7,6 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -61,6 +60,9 @@ jobs:
     name: Publish multi-arch image
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -86,13 +88,18 @@ jobs:
         id: date
         run: echo "timestamp=$(git log -1 --pretty=%cI)" >> "$GITHUB_OUTPUT"
 
+      - name: Set image name
+        env:
+          OWNER: ${{ github.repository_owner }}
+        run: echo "IMAGE=ghcr.io/$(echo "$OWNER" | tr '[:upper:]' '[:lower:]')/musicseerr" >> $GITHUB_ENV
+
       - name: Build and push (multi-arch)
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/musicseerr:${{ steps.version.outputs.tag }}
+          tags: ${{ env.IMAGE }}:${{ steps.version.outputs.tag }}
           build-args: |
             COMMIT_TAG=${{ steps.version.outputs.tag }}
             BUILD_DATE=${{ steps.date.outputs.timestamp }}
@@ -103,7 +110,9 @@ jobs:
 
       - name: Tag latest (stable releases only)
         if: ${{ !contains(steps.version.outputs.tag, '-') }}
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
         run: |
           docker buildx imagetools create \
-            -t ghcr.io/${{ github.repository_owner }}/musicseerr:latest \
-            ghcr.io/${{ github.repository_owner }}/musicseerr:${{ steps.version.outputs.tag }}
+            -t "${IMAGE}:latest" \
+            "${IMAGE}:${TAG}"
