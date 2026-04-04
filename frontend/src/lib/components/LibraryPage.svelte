@@ -145,7 +145,12 @@
 	{#if ctrl.fetchError}
 		<div role="alert" class="alert alert-error alert-soft mb-4">
 			<CircleX class="h-6 w-6 shrink-0" />
-			<span>{ctrl.fetchError}</span>
+			<div class="flex flex-col gap-1">
+				<span>{ctrl.fetchError}</span>
+				{#if ctrl.fetchErrorCode === 'CIRCUIT_BREAKER_OPEN' || /connection|DNS|not configured/i.test(ctrl.fetchError)}
+					<a href="/settings" class="link link-primary text-sm">Check your settings →</a>
+				{/if}
+			</div>
 			<button class="btn btn-sm btn-ghost" onclick={() => ctrl.fetchAlbums(true)}>Retry</button>
 		</div>
 	{/if}

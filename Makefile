@@ -91,6 +91,15 @@ backend-test-search-top-result: $(BACKEND_VENV_STAMP) ## Run search top result d
 backend-test-cache-cleanup: $(BACKEND_VENV_STAMP) ## Run cache cleanup tests
 	cd "$(BACKEND_DIR)" && .venv/bin/python -m pytest tests/test_cache_cleanup.py -v
 
+backend-test-lidarr-url: $(BACKEND_VENV_STAMP) ## Run dynamic Lidarr URL resolution tests
+	cd "$(BACKEND_DIR)" && .venv/bin/python -m pytest tests/test_lidarr_url_dynamic.py -v
+
+backend-test-sync-coordinator: $(BACKEND_VENV_STAMP) ## Run sync coordinator tests (cooldown, dedup)
+	cd "$(BACKEND_DIR)" && .venv/bin/python -m pytest tests/test_sync_coordinator.py -v
+
+backend-test-local-files-fallback: $(BACKEND_VENV_STAMP) ## Run local files stale-while-error fallback tests
+	cd "$(BACKEND_DIR)" && .venv/bin/python -m pytest tests/test_local_files_fallback.py -v
+
 test-audiodb-all: backend-test-audiodb backend-test-audiodb-prewarm backend-test-audiodb-settings backend-test-coverart-audiodb backend-test-audiodb-phase8 backend-test-audiodb-phase9 frontend-test-audiodb-images ## Run every AudioDB test target
 
 frontend-install: ## Install frontend npm dependencies

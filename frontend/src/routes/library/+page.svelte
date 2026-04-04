@@ -9,11 +9,13 @@
 	import Pagination from '$lib/components/Pagination.svelte';
 	import { recentlyAddedStore } from '$lib/stores/recentlyAdded';
 	import { syncStatus } from '$lib/stores/syncStatus.svelte';
-	import { api } from '$lib/api/client';
+	import { api, ApiError } from '$lib/api/client';
 	import { API } from '$lib/constants';
 	import { isAbortError } from '$lib/utils/errorHandling';
 	import type { Artist, Album } from '$lib/types';
 	import { CircleX, X, RefreshCw, ChevronRight, Search, Loader2 } from 'lucide-svelte';
+
+	const CIRCUIT_BREAKER_CODE = 'CIRCUIT_BREAKER_OPEN';
 
 	type LibraryArtist = {
 		name: string;
@@ -68,6 +70,7 @@
 	let loadingStats = true;
 	let syncing = false;
 	let error: string | null = null;
+	let errorCode: string | null = null;
 
 	let currentAlbumPage = 1;
 	let sortBy = 'date_added';
@@ -82,6 +85,8 @@
 	$: isSearching = searchQuery.trim().length > 0;
 	$: totalAlbumPages = Math.ceil(albumsTotal / ALBUMS_PER_PAGE);
 	$: lastSyncText = stats.last_sync ? new Date(stats.last_sync * 1000).toLocaleString() : 'Never';
+	$: isConnectionError = errorCode === CIRCUIT_BREAKER_CODE ||
+		(error != null && /connection|DNS|not configured/i.test(error));
 
 	onMount(() => {
 		recentlyAddedStore.initialize();
@@ -120,7 +125,12 @@
 			if (isAbortError(e)) return;
 			if (id !== albumsFetchId) return;
 			console.error("Couldn't load albums:", e);
-			error = "Couldn't load albums";
+			if (e instanceof ApiError) {
+				error = e.message;
+				errorCode = e.code;
+			} else {
+				error = "Couldn't load albums";
+			}
 		} finally {
 			if (id === albumsFetchId) loadingAlbums = false;
 		}
@@ -139,6 +149,7 @@
 
 	async function loadLibrary() {
 		error = null;
+		errorCode = null;
 		loadingArtists = true;
 		loadingStats = true;
 		currentAlbumPage = 1;
@@ -152,13 +163,19 @@
 	async function syncLibrary() {
 		syncing = true;
 		error = null;
+		errorCode = null;
 		try {
 			await api.global.post('/api/v1/library/sync');
 			syncStatus.checkStatus();
 			await loadLibrary();
 		} catch (e) {
 			console.error('Sync failed:', e);
-			error = e instanceof Error ? e.message : "Couldn't sync the library";
+			if (e instanceof ApiError) {
+				error = e.message;
+				errorCode = e.code;
+			} else {
+				error = e instanceof Error ? e.message : "Couldn't sync the library";
+			}
 		} finally {
 			syncing = false;
 		}
@@ -213,18 +230,24 @@
 	{#if error}
 		<div class="alert alert-error mb-6">
 			<CircleX class="h-6 w-6 shrink-0" />
-			<span>{error}</span>
+			<div class="flex flex-col gap-1">
+				<span>{error}</span>
+				{#if isConnectionError}
+					<a href="/settings" class="link link-primary text-sm">Check Lidarr settings →</a>
+				{/if}
+			</div>
 			<div class="flex gap-2">
 				<button
 					class="btn btn-sm"
 					onclick={() => {
 						error = null;
+						errorCode = null;
 						loadLibrary();
 					}}>Retry</button
 				>
 				<button
 					class="btn btn-sm btn-circle btn-ghost"
-					onclick={() => (error = null)}
+					onclick={() => { error = null; errorCode = null; }}
 					aria-label="Dismiss"
 				>
 					<X class="h-4 w-4" />

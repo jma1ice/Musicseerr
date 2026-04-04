@@ -22,6 +22,7 @@ from infrastructure.cache.cache_keys import LOCAL_FILES_PREFIX
 from infrastructure.cache.memory_cache import CacheInterface
 from infrastructure.cover_urls import prefer_release_group_cover_url
 from infrastructure.constants import STREAM_CHUNK_SIZE
+from infrastructure.resilience.retry import CircuitOpenError
 from infrastructure.serialization import to_jsonable
 from repositories.protocols import LidarrRepositoryProtocol
 from services.preferences_service import PreferencesService
@@ -96,12 +97,24 @@ class LocalFilesService:
         cached = await self._cache.get(cache_key)
         if cached is not None:
             return cached
-        data = await self._lidarr.get_all_albums()
-        if data:
-            await self._cache.set(
-                cache_key, data, ttl_seconds=self._ALBUM_LIST_TTL
-            )
-        return data or []
+        try:
+            data = await self._lidarr.get_all_albums()
+        except (ExternalServiceError, CircuitOpenError, ConnectionError, OSError):
+            # Stale-while-error: serve last-known data if Lidarr is down
+            try:
+                stale = await self._cache.get(f"{cache_key}:stale")
+            except Exception:  # noqa: BLE001
+                stale = None
+            if stale is not None:
+                logger.warning("Lidarr unavailable — serving stale local album data")
+                return stale
+            raise
+        result = data or []
+        if result:
+            await self._cache.set(cache_key, result, ttl_seconds=self._ALBUM_LIST_TTL)
+            # Keep a long-lived stale copy for fallback (24h)
+            await self._cache.set(f"{cache_key}:stale", result, ttl_seconds=86400)
+        return result
 
     def _resolve_and_validate_path(self, lidarr_path: str) -> Path:
         music_path, _ = self._get_config()

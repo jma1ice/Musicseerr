@@ -46,7 +46,10 @@ class LidarrBase:
         self._settings = settings
         self._client = http_client
         self._cache = cache
-        self._base_url = settings.lidarr_url
+
+    @property
+    def _base_url(self) -> str:
+        return self._settings.lidarr_url
 
     def is_configured(self) -> bool:
         return bool(self._settings.lidarr_api_key)

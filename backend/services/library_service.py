@@ -30,6 +30,7 @@ from infrastructure.cache.disk_cache import DiskMetadataCache
 from infrastructure.cover_urls import prefer_release_group_cover_url
 from infrastructure.serialization import clone_with_updates
 from core.exceptions import ExternalServiceError
+from infrastructure.resilience.retry import CircuitOpenError
 from services.cache_status_service import CacheStatusService
 from services.library_precache_service import LibraryPrecacheService
 
@@ -84,6 +85,7 @@ class LibraryService:
         self._manual_sync_cooldown: float = 60.0
         self._global_sync_cooldown: float = 30.0
         self._sync_lock = asyncio.Lock()
+        self._sync_future: asyncio.Future | None = None
 
     def _update_last_sync_timestamp(self) -> None:
         try:
@@ -208,6 +210,8 @@ class LibraryService:
                 for album in albums_data
             ]
             return albums, total
+        except (ExternalServiceError, CircuitOpenError):
+            raise
         except Exception as e:  # noqa: BLE001
             logger.error(f"Failed to fetch paginated albums: {e}")
             raise ExternalServiceError(f"Failed to fetch paginated albums: {e}")
@@ -242,6 +246,8 @@ class LibraryService:
                 for artist in artists_data
             ]
             return artists, total
+        except (ExternalServiceError, CircuitOpenError):
+            raise
         except Exception as e:  # noqa: BLE001
             logger.error(f"Failed to fetch paginated artists: {e}")
             raise ExternalServiceError(f"Failed to fetch paginated artists: {e}")
@@ -317,64 +323,100 @@ class LibraryService:
                     else:
                         logger.info("Library sync already in progress - skipping auto-sync")
                         return SyncLibraryResponse(status="skipped", artists=0, albums=0)
+
+                if self._sync_future is not None and not self._sync_future.done():
+                    existing_future = self._sync_future
+                else:
+                    existing_future = None
+                    loop = asyncio.get_running_loop()
+                    self._sync_future = loop.create_future()
+
+            # Shield so waiter cancellation doesn't poison the shared future
+            if existing_future is not None:
+                return await asyncio.shield(existing_future)
+            
+            sync_succeeded = False
+            try:
+                logger.info("Starting library sync from Lidarr")
+
+                albums = await self._lidarr_repo.get_library()
+                artists = await self._lidarr_repo.get_artists_from_library()
                 
-                self._last_sync_time = current_time
+                albums_data = [
+                    {
+                        'mbid': album.musicbrainz_id or f"unknown_{album.album}",
+                        'artist_mbid': album.artist_mbid,
+                        'artist_name': album.artist,
+                        'title': album.album,
+                        'year': album.year,
+                        'cover_url': self._normalized_album_cover_url(
+                            album.musicbrainz_id,
+                            album.cover_url,
+                        ),
+                        'monitored': album.monitored,
+                        'date_added': album.date_added
+                    }
+                    for album in albums
+                ]
+                
+                await self._library_db.save_library(artists, albums_data)
+                logger.info("Library cache updated - unmonitored items removed")
+
+                now = time.time()
+                self._last_sync_time = now
                 if is_manual:
-                    self._last_manual_sync = current_time
-            
-            logger.info("Starting library sync from Lidarr")
+                    self._last_manual_sync = now
 
-            albums = await self._lidarr_repo.get_library()
-            artists = await self._lidarr_repo.get_artists_from_library()
-            
-            albums_data = [
-                {
-                    'mbid': album.musicbrainz_id or f"unknown_{album.album}",
-                    'artist_mbid': album.artist_mbid,
-                    'artist_name': album.artist,
-                    'title': album.album,
-                    'year': album.year,
-                    'cover_url': self._normalized_album_cover_url(
-                        album.musicbrainz_id,
-                        album.cover_url,
-                    ),
-                    'monitored': album.monitored,
-                    'date_added': album.date_added
-                }
-                for album in albums
-            ]
-            
-            await self._library_db.save_library(artists, albums_data)
-            logger.info("Library cache updated - unmonitored items removed")
+                if self._precache_service is None:
+                    logger.warning("Precache skipped — sync_state_store/genre_index not provided")
+                    self._update_last_sync_timestamp()
+                    result = SyncLibraryResponse(status='success', artists=len(artists), albums=len(albums))
+                    self._sync_future.set_result(result)
+                    return result
 
-            if self._precache_service is None:
-                logger.warning("Precache skipped — sync_state_store/genre_index not provided")
-                return
+                task = asyncio.create_task(self._precache_service.precache_library_resources(artists, albums))
 
-            task = asyncio.create_task(self._precache_service.precache_library_resources(artists, albums))
+                def on_task_done(t: asyncio.Task):
+                    try:
+                        exc = t.exception()
+                        if exc:
+                            logger.error(f"Precache task failed: {exc}")
+                    except asyncio.CancelledError:
+                        logger.info("Precache task was cancelled")
+                    finally:
+                        status_service.set_current_task(None)
 
-            def on_task_done(t: asyncio.Task):
-                try:
-                    exc = t.exception()
-                    if exc:
-                        logger.error(f"Precache task failed: {exc}")
-                except asyncio.CancelledError:
-                    logger.info("Precache task was cancelled")
-                finally:
-                    status_service.set_current_task(None)
+                task.add_done_callback(on_task_done)
+                status_service.set_current_task(task)
 
-            task.add_done_callback(on_task_done)
-            status_service.set_current_task(task)
+                logger.info(f"Library sync complete: {len(artists)} artists, {len(albums)} albums")
 
-            logger.info(f"Library sync complete: {len(artists)} artists, {len(albums)} albums")
+                self._update_last_sync_timestamp()
 
-            self._update_last_sync_timestamp()
-
-            return SyncLibraryResponse(
-                status='success',
-                artists=len(artists),
-                albums=len(albums),
-            )
+                result = SyncLibraryResponse(
+                    status='success',
+                    artists=len(artists),
+                    albums=len(albums),
+                )
+                sync_succeeded = True
+                self._sync_future.set_result(result)
+                return result
+            except BaseException as exc:
+                if self._sync_future is not None and not self._sync_future.done():
+                    self._sync_future.set_exception(exc)
+                raise
+            finally:
+                if not sync_succeeded:
+                    future = self._sync_future
+                    self._sync_future = None
+                    # Suppress "Future exception was never retrieved" if no waiter
+                    if future is not None and future.done() and not future.cancelled():
+                        try:
+                            future.exception()
+                        except BaseException:
+                            pass
+        except (ExternalServiceError, CircuitOpenError):
+            raise
         except Exception as e:  # noqa: BLE001
             logger.error(f"Couldn't sync the library: {e}")
             raise ExternalServiceError(f"Couldn't sync the library: {e}")

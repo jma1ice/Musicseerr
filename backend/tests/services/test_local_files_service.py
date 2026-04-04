@@ -166,8 +166,8 @@ async def test_get_albums_caches_lidarr_response(service):
     assert result.total == 1
 
     assert cache.set.called
-    call_args = cache.set.call_args
-    assert call_args[0][0] == "local_files_all_albums"
+    cache_keys = [call.args[0] for call in cache.set.call_args_list]
+    assert "local_files_all_albums" in cache_keys
 
 
 @pytest.mark.asyncio

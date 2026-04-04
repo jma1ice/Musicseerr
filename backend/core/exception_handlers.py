@@ -23,6 +23,7 @@ from models.error import (
     CONFIGURATION_ERROR,
     SOURCE_RESOLUTION_ERROR,
     INTERNAL_ERROR,
+    CIRCUIT_BREAKER_OPEN,
     STATUS_TO_CODE,
 )
 
@@ -41,7 +42,11 @@ async def external_service_error_handler(request: Request, exc: ExternalServiceE
 
 async def circuit_open_error_handler(request: Request, exc: CircuitOpenError) -> MsgSpecJSONResponse:
     logger.error("Circuit breaker open: %s - %s %s", exc, request.method, request.url.path)
-    return error_response(status.HTTP_503_SERVICE_UNAVAILABLE, SERVICE_UNAVAILABLE, "Service temporarily unavailable")
+    return error_response(
+        status.HTTP_503_SERVICE_UNAVAILABLE,
+        CIRCUIT_BREAKER_OPEN,
+        "Service temporarily unavailable due to repeated connection failures. Check your settings or wait for the service to recover.",
+    )
 
 
 async def validation_error_handler(request: Request, exc: ValidationError) -> MsgSpecJSONResponse:

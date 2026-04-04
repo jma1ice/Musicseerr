@@ -95,10 +95,9 @@ async def sync_library(
     try:
         return await library_service.sync_library(is_manual=True)
     except ExternalServiceError as e:
-        logger.error(f"Couldn't sync the library: {e}")
         if "cooldown" in str(e).lower():
             raise HTTPException(status_code=429, detail="Sync is on cooldown, please wait")
-        raise HTTPException(status_code=503, detail="External service unavailable")
+        raise
 
 
 @router.get("/stats", response_model=LibraryStatsResponse)

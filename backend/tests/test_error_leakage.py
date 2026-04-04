@@ -70,5 +70,5 @@ async def test_circuit_open_error_hides_details():
 
     body = resp.json()
     assert resp.status_code == 503
-    assert body["error"]["message"] == "Service temporarily unavailable"
+    assert body["error"]["message"] == "Service temporarily unavailable due to repeated connection failures. Check your settings or wait for the service to recover."
     assert "JellyfinRepository" not in resp.text

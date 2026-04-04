@@ -73,6 +73,7 @@ export function createLibraryController<TAlbum>(adapter: LibraryAdapter<TAlbum>)
 	let loading = $state(true);
 	let loadingMore = $state(false);
 	let fetchError = $state('');
+	let fetchErrorCode = $state('');
 
 	let sortBy = $state(adapter.defaultSortBy);
 	let sortOrder = $state(adapter.ascValue);
@@ -98,6 +99,7 @@ export function createLibraryController<TAlbum>(adapter: LibraryAdapter<TAlbum>)
 	async function fetchAlbums(reset = false): Promise<void> {
 		const id = ++fetchId;
 		fetchError = '';
+		fetchErrorCode = '';
 
 		if (albumsAbortController) albumsAbortController.abort();
 		albumsAbortController = new AbortController();
@@ -145,6 +147,7 @@ export function createLibraryController<TAlbum>(adapter: LibraryAdapter<TAlbum>)
 			if (isAbortError(e)) return;
 			if (id === fetchId) {
 				fetchError = e instanceof ApiError ? e.message : adapter.errorMessage;
+				fetchErrorCode = e instanceof ApiError ? e.code : '';
 			}
 		} finally {
 			if (id === fetchId) {
@@ -363,6 +366,9 @@ export function createLibraryController<TAlbum>(adapter: LibraryAdapter<TAlbum>)
 		},
 		get fetchError() {
 			return fetchError;
+		},
+		get fetchErrorCode() {
+			return fetchErrorCode;
 		},
 		get sortBy() {
 			return sortBy;
