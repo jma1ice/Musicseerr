@@ -12,7 +12,7 @@ BACKEND_VIRTUALENV_ZIPAPP := $(BACKEND_DIR)/.virtualenv.pyz
 PYTHON ?= python3
 NPM ?= pnpm
 
-.PHONY: help backend-venv backend-lint backend-test backend-test-audiodb backend-test-audiodb-prewarm backend-test-audiodb-settings backend-test-coverart-audiodb backend-test-audiodb-phase8 backend-test-audiodb-phase9 backend-test-exception-handling backend-test-playlist backend-test-multidisc backend-test-performance backend-test-security backend-test-config-validation backend-test-home backend-test-home-genre backend-test-infra-hardening backend-test-library-pagination backend-test-search-top-result test-audiodb-all frontend-install frontend-build frontend-check frontend-lint frontend-test frontend-test-queuehelpers frontend-test-album-page frontend-test-playlist-detail frontend-test-audiodb-images frontend-browser-install project-map rebuild test check lint ci
+.PHONY: help backend-venv backend-lint backend-test backend-test-audiodb backend-test-audiodb-prewarm backend-test-audiodb-settings backend-test-coverart-audiodb backend-test-audiodb-phase8 backend-test-audiodb-phase9 backend-test-exception-handling backend-test-playlist backend-test-multidisc backend-test-performance backend-test-security backend-test-config-validation backend-test-home backend-test-home-genre backend-test-infra-hardening backend-test-library-pagination backend-test-search-top-result test-audiodb-all backend-test-artist-page backend-test-monitoring-cache frontend-install frontend-build frontend-format-check frontend-check frontend-lint frontend-test frontend-test-queuehelpers frontend-test-album-page frontend-test-playlist-detail frontend-test-audiodb-images frontend-browser-install project-map rebuild test check lint ci
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z0-9_.-]+:.*## ' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*## "}; {printf "%-26s %s\n", $$1, $$2}'
@@ -82,6 +82,9 @@ backend-test-infra-hardening: $(BACKEND_VENV_STAMP) ## Run infrastructure harden
 backend-test-discovery-precache: $(BACKEND_VENV_STAMP) ## Run artist discovery precache tests
 	cd "$(BACKEND_DIR)" && .venv/bin/python -m pytest tests/services/test_discovery_precache_progress.py tests/services/test_discovery_precache_lock.py tests/infrastructure/test_retry_non_breaking.py -v
 
+backend-test-dedup-cancellation: $(BACKEND_VENV_STAMP) ## Run deduplicator cancellation tests
+	cd "$(BACKEND_DIR)" && .venv/bin/python -m pytest tests/infrastructure/test_dedup_cancellation.py tests/infrastructure/test_disconnect.py -v
+
 backend-test-library-pagination: $(BACKEND_VENV_STAMP) ## Run library pagination tests
 	cd "$(BACKEND_DIR)" && .venv/bin/python -m pytest tests/infrastructure/test_library_pagination.py -v
 
@@ -130,18 +133,30 @@ backend-test-mus15-status-race: $(BACKEND_VENV_STAMP) ## Run MUS-15 status race 
 backend-test-artist-monitoring: $(BACKEND_VENV_STAMP) ## Run MUS-15B artist monitoring tests
 	cd "$(BACKEND_DIR)" && .venv/bin/python -m pytest tests/test_artist_monitoring.py -v
 
+backend-test-monitoring-cache: $(BACKEND_VENV_STAMP) ## Run artist monitoring cache/flag refresh tests
+	cd "$(BACKEND_DIR)" && .venv/bin/python -m pytest tests/services/test_refresh_library_flags.py tests/test_queue_disk_invalidation.py tests/services/test_artist_utils_tags.py -v
+
 backend-test-album-refresh: $(BACKEND_VENV_STAMP) ## Run album refresh endpoint tests
 	cd "$(BACKEND_DIR)" && .venv/bin/python -m pytest tests/routes/test_album_refresh.py tests/services/test_navidrome_cache_invalidation.py -v
 
+backend-test-artist-page: $(BACKEND_VENV_STAMP) ## Run artist page latency tests (basic route, releases, Last.fm fast path)
+	cd "$(BACKEND_DIR)" && .venv/bin/python -m pytest tests/routes/test_artist_basic_route.py tests/routes/test_artist_releases_route.py tests/services/test_artist_basic_info.py tests/services/test_top_albums_lastfm_fast.py -v
+
 test-audiodb-all: backend-test-audiodb backend-test-audiodb-prewarm backend-test-audiodb-settings backend-test-coverart-audiodb backend-test-audiodb-phase8 backend-test-audiodb-phase9 frontend-test-audiodb-images ## Run every AudioDB test target
 
-test-sync-all: backend-test-sync-watchdog backend-test-sync-resume backend-test-audiodb-parallel ## Run all sync robustness tests
+backend-test-sync-generation: $(BACKEND_VENV_STAMP) ## Run MUS-19 sync generation counter tests
+	cd "$(BACKEND_DIR)" && .venv/bin/python -m pytest tests/test_sync_generation.py -v
+
+test-sync-all: backend-test-sync-watchdog backend-test-sync-resume backend-test-audiodb-parallel backend-test-sync-generation ## Run all sync robustness tests
 
 frontend-install: ## Install frontend npm dependencies
 	cd "$(FRONTEND_DIR)" && $(NPM) install
 
 frontend-build: ## Run frontend production build
 	cd "$(FRONTEND_DIR)" && $(NPM) run build
+
+frontend-format-check: ## Run frontend formatting checks
+	cd "$(FRONTEND_DIR)" && $(NPM) run format:check
 
 frontend-check: ## Run frontend type checks
 	cd "$(FRONTEND_DIR)" && $(NPM) run check
@@ -154,6 +169,9 @@ frontend-test: ## Run the frontend vitest suite
 
 frontend-test-queuehelpers: ## Run queue helper regressions
 	cd "$(FRONTEND_DIR)" && $(NPM) exec vitest run --project server src/lib/player/queueHelpers.spec.ts
+
+frontend-test-monitored-artists: ## Run pending monitored artist store tests
+	cd "$(FRONTEND_DIR)" && $(NPM) exec vitest run --project server src/lib/stores/monitoredArtists.spec.ts
 
 frontend-test-album-page: ## Run the album page browser test
 	cd "$(FRONTEND_DIR)" && $(NPM) exec vitest run --project client src/routes/album/[id]/page.svelte.spec.ts

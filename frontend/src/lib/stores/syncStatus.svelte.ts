@@ -58,9 +58,6 @@ function createSyncStatusStore() {
 	let hideTimeout: ReturnType<typeof setTimeout> | null = null;
 	let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
 	let reconnectAttempts = 0;
-	// TODO: do we need this?
-	// eslint-disable-next-line @typescript-eslint/no-unused-vars
-	let statusVersion = 0;
 	let connected = false;
 
 	function clearAllTimers(): void {
@@ -79,7 +76,6 @@ function createSyncStatusStore() {
 	}
 
 	function applyStatus(newStatus: SyncStatus): void {
-		statusVersion++;
 		const wasSyncing = status.is_syncing;
 		status = newStatus;
 
@@ -297,6 +293,10 @@ function createSyncStatusStore() {
 			isDismissed = true;
 		},
 
+		undismiss(): void {
+			isDismissed = false;
+		},
+
 		minimize(): void {
 			isMinimized = true;
 		},
@@ -307,6 +307,14 @@ function createSyncStatusStore() {
 
 		checkStatus(): void {
 			void fetchStatus();
+		},
+
+		async cancelSync(): Promise<void> {
+			try {
+				await api.global.post('/api/v1/cache/sync/cancel');
+			} catch {
+				// ignore errors, sync may already be stopped
+			}
 		}
 	};
 }

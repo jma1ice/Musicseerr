@@ -430,6 +430,7 @@ class ArtistService:
             artist_info = await self._apply_audiodb_artist_images(
                 artist_info, artist_id, artist_info.name, allow_fetch=False,
             )
+            await self._refresh_library_flags(artist_info)
             await self._save_artist_to_cache(artist_id, artist_info)
             if not future.done():
                 future.set_result(artist_info)
@@ -457,7 +458,21 @@ class ArtistService:
                         continue
                     rg.in_library = rg_id in library_mbids
                     rg.requested = rg_id in requested_mbids and not rg.in_library
-            artist_info.in_library = artist_info.musicbrainz_id.lower() in artist_mbids
+            mbid_lower = artist_info.musicbrainz_id.lower()
+            is_in_artist_mbids = mbid_lower in artist_mbids
+            artist_info.in_library = is_in_artist_mbids
+            if is_in_artist_mbids:
+                try:
+                    lidarr_artist = await self._lidarr_repo.get_artist_details(artist_info.musicbrainz_id)
+                    if lidarr_artist is not None:
+                        artist_info.in_lidarr = True
+                        artist_info.monitored = lidarr_artist.get("monitored", False)
+                        artist_info.auto_download = lidarr_artist.get("monitor_new_items", "none") == "all"
+                    elif not artist_info.in_lidarr:
+                        artist_info.in_lidarr = True
+                except Exception:  # noqa: BLE001
+                    if not artist_info.in_lidarr:
+                        artist_info.in_lidarr = True
         except Exception as e:  # noqa: BLE001
             logger.warning(f"Failed to refresh library flags: {e}")
 

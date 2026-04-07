@@ -25,6 +25,7 @@ CIRCUIT_OPEN_CACHE_TTL = 30
 DEFAULT_SIMILAR_COUNT = 15
 DEFAULT_TOP_SONGS_COUNT = 10
 DEFAULT_TOP_ALBUMS_COUNT = 10
+_DISCOVERY_WORKER_TIMEOUT = 120
 
 # Module-level flag survives singleton cache invalidation / instance recreation
 _discovery_precache_running = False
@@ -409,6 +410,7 @@ class ArtistDiscoveryService:
         delay: float = 0.5,
         status_service: Any = None,
         mbid_to_name: dict[str, str] | None = None,
+        generation: int = 0,
     ) -> int:
         global _discovery_precache_running
         if _discovery_precache_running:
@@ -420,6 +422,7 @@ class ArtistDiscoveryService:
             return await self._do_precache_artist_discovery(
                 artist_mbids, delay=delay,
                 status_service=status_service, mbid_to_name=mbid_to_name,
+                generation=generation,
             )
         finally:
             _discovery_precache_running = False
@@ -430,6 +433,7 @@ class ArtistDiscoveryService:
         delay: float = 0.5,
         status_service: Any = None,
         mbid_to_name: dict[str, str] | None = None,
+        generation: int = 0,
     ) -> int:
         sources: list[Literal["listenbrainz", "lastfm"]] = []
         if self._lb_repo.is_configured():
@@ -447,10 +451,11 @@ class ArtistDiscoveryService:
         cached_count = 0
         source_fetches = 0
         advanced = self._preferences_service.get_advanced_settings() if self._preferences_service else None
-        discovery_concurrency = getattr(advanced, 'artist_discovery_precache_concurrency', 3) if advanced else 3
+        discovery_concurrency = getattr(advanced, 'artist_discovery_precache_concurrency', 5) if advanced else 5
         sem = asyncio.Semaphore(discovery_concurrency)
         counter_lock = asyncio.Lock()
         progress_counter = 0
+        counted_workers: set[int] = set()
 
         async def process_artist(idx: int, mbid: str) -> bool:
             nonlocal cached_count, source_fetches, progress_counter
@@ -493,18 +498,18 @@ class ArtistDiscoveryService:
                         async with counter_lock:
                             source_fetches += 1
 
-                    # Sleep inside semaphore to hold slot and throttle API calls
-                    if delay > 0:
-                        await asyncio.sleep(delay)
+                if delay > 0:
+                    await asyncio.sleep(delay)
 
                 async with counter_lock:
                     cached_count += 1
                     progress_counter += 1
                     local_progress = progress_counter
+                    counted_workers.add(idx)
 
                 if status_service:
                     artist_name = (mbid_to_name or {}).get(mbid, mbid[:8])
-                    await status_service.update_progress(local_progress, current_item=artist_name)
+                    await status_service.update_progress(local_progress, current_item=artist_name, generation=generation)
 
                 if local_progress % 10 == 0:
                     logger.info("Discovery precache progress: %d/%d artists", local_progress, len(artist_mbids))
@@ -515,9 +520,31 @@ class ArtistDiscoveryService:
                 async with counter_lock:
                     progress_counter += 1
                     local_progress = progress_counter
+                    counted_workers.add(idx)
                 if status_service:
                     artist_name = (mbid_to_name or {}).get(mbid, mbid[:8])
-                    await status_service.update_progress(local_progress, current_item=artist_name)
+                    await status_service.update_progress(local_progress, current_item=artist_name, generation=generation)
+                return False
+
+        async def process_artist_with_timeout(idx: int, mbid: str) -> bool:
+            nonlocal progress_counter
+            try:
+                return await asyncio.wait_for(
+                    process_artist(idx, mbid), timeout=_DISCOVERY_WORKER_TIMEOUT
+                )
+            except asyncio.TimeoutError:
+                logger.warning("Discovery timed out for %s after %ds", mbid[:8], _DISCOVERY_WORKER_TIMEOUT)
+                async with counter_lock:
+                    if idx not in counted_workers:
+                        progress_counter += 1
+                        counted_workers.add(idx)
+                    local_progress = progress_counter
+                if status_service:
+                    artist_name = (mbid_to_name or {}).get(mbid, mbid[:8])
+                    await status_service.update_progress(
+                        local_progress, current_item=f"{artist_name} (timed out)",
+                        generation=generation,
+                    )
                 return False
 
         chunk = max(discovery_concurrency * 4, 20)
@@ -526,7 +553,7 @@ class ArtistDiscoveryService:
                 logger.info("Discovery precache cancelled by user")
                 break
             batch = artist_mbids[i:i + chunk]
-            batch_tasks = [asyncio.create_task(process_artist(i + j, mbid)) for j, mbid in enumerate(batch)]
+            batch_tasks = [asyncio.create_task(process_artist_with_timeout(i + j, mbid)) for j, mbid in enumerate(batch)]
             if batch_tasks:
                 await asyncio.gather(*batch_tasks, return_exceptions=True)
 
@@ -655,29 +682,26 @@ class ArtistDiscoveryService:
             )
 
             trimmed = lfm_albums[:count]
-            mbids_from_lastfm = [
-                a.mbid.strip().lower() for a in trimmed if a.mbid and a.mbid.strip()
-            ]
-            rg_map = await self._resolve_release_groups(mbids_from_lastfm) if mbids_from_lastfm else {}
 
+            # Last.fm usually returns release-group MBIDs here, so keep them as-is
+            # and let the discover queue resolve the rare mismatches.
             albums = []
             for a in trimmed:
                 raw_mbid = a.mbid.strip().lower() if a.mbid and a.mbid.strip() else None
-                resolved_mbid = rg_map.get(raw_mbid, raw_mbid) if raw_mbid else None
                 albums.append(
                     TopAlbum(
-                        release_group_mbid=resolved_mbid,
+                        release_group_mbid=raw_mbid,
                         title=a.name,
                         artist_name=a.artist_name,
                         listen_count=a.playcount,
                         in_library=(
-                            resolved_mbid in library_album_mbids
-                            if resolved_mbid
+                            raw_mbid in library_album_mbids
+                            if raw_mbid
                             else False
                         ),
                         requested=(
-                            resolved_mbid in requested_album_mbids
-                            if resolved_mbid
+                            raw_mbid in requested_album_mbids
+                            if raw_mbid
                             else False
                         ),
                     )

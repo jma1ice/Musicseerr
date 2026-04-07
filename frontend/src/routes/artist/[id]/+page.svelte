@@ -31,6 +31,7 @@
 	import { getArtistDiscoveryCache, setArtistDiscoveryCache } from '$lib/stores/discoveryCache';
 	import { integrationStore } from '$lib/stores/integration';
 	import { musicSourceStore, type MusicSource } from '$lib/stores/musicSource';
+	import { monitoredArtistsStore } from '$lib/stores/monitoredArtists';
 	import {
 		artistBasicCache,
 		artistExtendedCache,
@@ -50,6 +51,7 @@
 	let artist: ArtistInfo | null = $state(null);
 	let loadingBasic = $state(true);
 	let loadingExtended = $state(true);
+	let refreshingArtist = $state(false);
 	let error: string | null = $state(null);
 	let showToast = $state(false);
 	let toastMessage = 'Added to Library';
@@ -190,9 +192,16 @@
 	}
 
 	async function fetchArtist(force = false) {
-		const { refreshBasic, refreshExtended, refreshLastfm } = force
+		const hasPendingMonitor = !!monitoredArtistsStore.getPendingMonitor(data.artistId);
+		const {
+			refreshBasic: cacheRefreshBasic,
+			refreshExtended,
+			refreshLastfm
+		} = force
 			? { refreshBasic: true, refreshExtended: true, refreshLastfm: true }
 			: hydrateFromCache(data.artistId);
+		const staleLibraryFlags = artist && artist.in_library && !artist.in_lidarr;
+		const refreshBasic = cacheRefreshBasic || hasPendingMonitor || !!staleLibraryFlags;
 
 		if (!artist || refreshBasic) loadingBasic = true;
 		if (!artist || refreshExtended) loadingExtended = true;
@@ -217,21 +226,29 @@
 			void fetchDiscoveryData(musicSourceStore.getPageSource('artist'));
 		});
 
+		const forceBasic = force || !!staleLibraryFlags || hasPendingMonitor;
 		if (refreshBasic || !artist) {
-			await Promise.all([fetchBasicInfo(force), sourceLoadPromise]);
+			await Promise.all([fetchBasicInfo(forceBasic), sourceLoadPromise]);
 		} else {
 			await sourceLoadPromise;
 		}
 
 		if (artist) {
+			const secondaryPromises: Promise<void>[] = [];
 			if (refreshExtended) {
-				void fetchExtendedInfo(force, artist);
+				secondaryPromises.push(fetchExtendedInfo(force, artist));
 			}
 			if (refreshLastfm) {
-				void fetchLastFmEnrichment();
+				secondaryPromises.push(fetchLastFmEnrichment());
 			}
+
+			// Start background release loading after all other data has settled
 			if (hasMoreReleases) {
-				void fetchMoreReleases();
+				Promise.allSettled(secondaryPromises).then(() => {
+					if (abortController && !abortController.signal.aborted) {
+						void fetchMoreReleases();
+					}
+				});
 			}
 		}
 	}
@@ -254,6 +271,9 @@
 				artist = sortedResult.artistInfo;
 				applyArtistReleasePaginationState(sortedResult.pagination);
 				artistBasicCache.set(artist, data.artistId);
+				if (artistData.in_lidarr) {
+					monitoredArtistsStore.removePendingMonitor(data.artistId);
+				}
 			}
 		} catch (e) {
 			if (isAbortError(e)) {
@@ -492,6 +512,15 @@
 		}
 	}
 
+	async function handleRefreshClick() {
+		refreshingArtist = true;
+		try {
+			await fetchArtist(true);
+		} finally {
+			refreshingArtist = false;
+		}
+	}
+
 	onMount(() => {
 		if (browser) {
 			const handleRefresh = () => fetchArtist(true);
@@ -591,7 +620,12 @@
 
 			<div class="xl:col-start-2 xl:row-start-1 space-y-4 sm:space-y-6 lg:space-y-8">
 				<section id="section-overview" class="space-y-4 scroll-mt-24">
-					<ArtistHero {artist} showBackButton />
+					<ArtistHero
+						{artist}
+						showBackButton
+						refreshing={refreshingArtist}
+						onrefresh={handleRefreshClick}
+					/>
 
 					<div class="flex flex-wrap items-center gap-x-4 gap-y-2 justify-center sm:justify-start">
 						{#if artist.country}
@@ -617,7 +651,7 @@
 
 					{#if artist.tags.length > 0}
 						<div class="flex flex-wrap gap-2 justify-center sm:justify-start -mt-2">
-							{#each artist.tags.slice(0, 10) as tag (tag)}
+							{#each [...new Set(artist.tags)].slice(0, 10) as tag (tag)}
 								<a
 									href="/genre?name={encodeURIComponent(tag)}"
 									class="badge badge-lg cursor-pointer hover:opacity-80 transition-opacity"
@@ -692,7 +726,7 @@
 						<span class="loading loading-spinner loading-md" style="color: {colors.accent};"></span>
 						<div class="flex flex-col items-start">
 							<span class="font-semibold text-base" style="color: {colors.accent};"
-								>Loading all releases...</span
+								>Loading releases...</span
 							>
 							<span class="text-sm text-base-content/70"
 								>Loaded {loadedReleaseCount} of {totalReleaseCount} releases</span

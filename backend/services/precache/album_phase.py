@@ -33,6 +33,7 @@ class AlbumPhase:
         status_service: CacheStatusService,
         library_album_mbids: dict[str, Any] = None,
         offset: int = 0,
+        generation: int = 0,
     ) -> None:
         from core.dependencies import get_album_service
         logger.info(f"Pre-caching {len(release_group_ids)} new/missing release-groups")
@@ -47,11 +48,11 @@ class AlbumPhase:
                 cache_key = f"{ALBUM_INFO_PREFIX}{rgid}"
                 cached_info = await album_service._cache.get(cache_key)
                 if not cached_info:
-                    await status_service.update_progress(index + 1, f"Fetching metadata for {rgid[:8]}...", processed_albums=offset + index + 1)
+                    await status_service.update_progress(index + 1, f"Fetching metadata for {rgid[:8]}...", processed_albums=offset + index + 1, generation=generation)
                     await album_service.get_album_info(rgid, monitored_mbids=monitored_mbids)
                     metadata_fetched = True
                 else:
-                    await status_service.update_progress(index + 1, f"Cached: {rgid[:8]}...", processed_albums=offset + index + 1)
+                    await status_service.update_progress(index + 1, f"Cached: {rgid[:8]}...", processed_albums=offset + index + 1, generation=generation)
                 if rgid.lower() in monitored_mbids:
                     cache_filename = get_cache_filename(f"rg_{rgid}", "500")
                     file_path = self._cover_repo.cache_dir / f"{cache_filename}.bin"
@@ -73,7 +74,8 @@ class AlbumPhase:
         metadata_fetched = 0
         covers_fetched = 0
         consecutive_slow_batches = 0
-        for i in range(0, len(release_group_ids), batch_size):
+        i = 0
+        while i < len(release_group_ids):
             if status_service.is_cancelled():
                 logger.info("Album pre-caching cancelled by user")
                 break
@@ -98,7 +100,7 @@ class AlbumPhase:
                         processed_mbids.append(rgid)
             if processed_mbids:
                 await self._sync_state_store.mark_items_processed_batch('album', processed_mbids)
-            await status_service.persist_progress()
+            await status_service.persist_progress(generation=generation)
             batch_duration = time.time() - batch_start
             avg_time_per_item = batch_duration / len(batch) if batch else 1.0
             if avg_time_per_item > 1.5:
@@ -114,9 +116,11 @@ class AlbumPhase:
                 if avg_time_per_item < 0.8 and batch_size < max_batch:
                     batch_size = min(batch_size + 1, max_batch)
                     logger.debug(f"Increasing batch size to {batch_size} (fast: {avg_time_per_item:.2f}s/item)")
-            if (i + batch_size) % 30 == 0 or (i + batch_size) >= len(release_group_ids):
-                percent = int((min(i + batch_size, len(release_group_ids)) / len(release_group_ids)) * 100)
-                logger.info(f"Album progress: {min(i + batch_size, len(release_group_ids))}/{len(release_group_ids)} ({percent}%) - metadata: {metadata_fetched}, covers: {covers_fetched} [batch: {batch_size}]")
+            next_i = i + len(batch)
+            if next_i % 30 == 0 or next_i >= len(release_group_ids):
+                percent = int((min(next_i, len(release_group_ids)) / len(release_group_ids)) * 100)
+                logger.info(f"Album progress: {min(next_i, len(release_group_ids))}/{len(release_group_ids)} ({percent}%) - metadata: {metadata_fetched}, covers: {covers_fetched} [batch: {batch_size}]")
+            i = next_i
             await asyncio.sleep(advanced_settings.delay_albums)
-        await status_service.persist_progress(force=True)
+        await status_service.persist_progress(force=True, generation=generation)
         logger.info(f"Album pre-caching complete: metadata fetched={metadata_fetched}, covers fetched={covers_fetched}, total processed={len(release_group_ids)}")

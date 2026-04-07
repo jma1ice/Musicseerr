@@ -36,18 +36,32 @@ class ArtistPhase:
         library_artist_mbids: set[str] = None,
         library_album_mbids: dict[str, Any] = None,
         offset: int = 0,
+        generation: int = 0,
     ) -> None:
         logger.info(f"Pre-caching metadata+images for {len(artists)} artists")
         from core.dependencies import get_artist_service
         from infrastructure.validators import is_unknown_mbid
         artist_service = get_artist_service()
 
+        seen_mbids: set[str] = set()
+        unique_artists: list[dict] = []
+        for a in artists:
+            mbid = a.get('mbid')
+            if not mbid or is_unknown_mbid(mbid):
+                unique_artists.append(a)
+            elif mbid.lower() not in seen_mbids:
+                seen_mbids.add(mbid.lower())
+                unique_artists.append(a)
+        if len(unique_artists) < len(artists):
+            logger.info("Deduplicated %d artists to %d unique", len(artists), len(unique_artists))
+        artists = unique_artists
+
         async def cache_artist(artist: dict, index: int) -> str:
             mbid = artist.get('mbid')
             try:
                 artist_name = artist.get('name', 'Unknown')
                 if is_unknown_mbid(mbid):
-                    await status_service.update_progress(index + 1, artist_name, processed_artists=offset + index + 1)
+                    await status_service.update_progress(index + 1, artist_name, processed_artists=offset + index + 1, generation=generation)
                     return mbid
                 artist_cache_key = f"{ARTIST_INFO_PREFIX}{mbid}"
                 cached_artist = await artist_service._cache.get(artist_cache_key)
@@ -64,18 +78,18 @@ class ArtistPhase:
                 file_path_500 = self._cover_repo.cache_dir / f"{cache_filename_500}.bin"
                 if file_path_250.exists() and file_path_500.exists():
                     logger.debug(f"Artist images for {artist_name} already cached, skipping")
-                    await status_service.update_progress(index + 1, artist_name, processed_artists=offset + index + 1)
+                    await status_service.update_progress(index + 1, artist_name, processed_artists=offset + index + 1, generation=generation)
                     return mbid
-                await status_service.update_progress(index + 1, f"Fetching images for {artist_name}", processed_artists=offset + index + 1)
+                await status_service.update_progress(index + 1, f"Fetching images for {artist_name}", processed_artists=offset + index + 1, generation=generation)
                 if not file_path_250.exists():
                     await self._cover_repo.get_artist_image(mbid, size=250)
                 if not file_path_500.exists():
                     await self._cover_repo.get_artist_image(mbid, size=500)
-                await status_service.update_progress(index + 1, artist_name, processed_artists=offset + index + 1)
+                await status_service.update_progress(index + 1, artist_name, processed_artists=offset + index + 1, generation=generation)
                 return mbid
             except Exception as e:  # noqa: BLE001
                 logger.warning(f"Failed to cache artist {artist.get('name')} (mbid: {mbid}): {e}", exc_info=True)
-                await status_service.update_progress(index + 1, f"Failed: {artist.get('name', 'Unknown')}", processed_artists=offset + index + 1)
+                await status_service.update_progress(index + 1, f"Failed: {artist.get('name', 'Unknown')}", processed_artists=offset + index + 1, generation=generation)
                 return mbid
 
         advanced_settings = self._preferences_service.get_advanced_settings()
@@ -97,9 +111,9 @@ class ArtistPhase:
                     processed_mbids.append(result)
             if processed_mbids:
                 await self._sync_state_store.mark_items_processed_batch('artist', processed_mbids)
-            await status_service.persist_progress()
+            await status_service.persist_progress(generation=generation)
             await asyncio.sleep(advanced_settings.delay_artist)
-        await status_service.persist_progress(force=True)
+        await status_service.persist_progress(force=True, generation=generation)
         logger.info("Artist metadata+image pre-caching complete")
         await self._cache_artist_genres(artists)
 

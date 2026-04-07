@@ -103,8 +103,8 @@ async def test_lock_released_after_exception():
 
 
 @pytest.mark.asyncio
-async def test_delay_holds_semaphore_slot():
-    """Delay is applied inside the semaphore, blocking other artists from starting."""
+async def test_delay_does_not_hold_semaphore_slot():
+    """Delay is applied outside the semaphore, allowing other artists to start during sleep."""
     svc = _make_service()
     timestamps: list[float] = []
 
@@ -125,12 +125,13 @@ async def test_delay_holds_semaphore_slot():
         )
 
     assert len(timestamps) == 4
-    # With concurrency=2 and delay=0.15s inside semaphore, the 3rd artist
-    # cannot start until one of the first two finishes its delay.
-    # The gap between the 2nd and 3rd timestamps should be >= delay.
+    # With concurrency=2 and delay=0.15s OUTSIDE semaphore, the 3rd artist
+    # can start as soon as a semaphore slot frees (before the delay finishes).
+    # All four API calls should start quickly — the gap between 1st and 3rd
+    # should be small since the semaphore isn't held during sleep.
     sorted_ts = sorted(timestamps)
     gap = sorted_ts[2] - sorted_ts[0]
-    assert gap >= 0.1, f"Expected >=0.1s gap due to semaphore-held delay, got {gap:.3f}s"
+    assert gap < 0.15, f"Expected <0.15s gap since sleep is outside semaphore, got {gap:.3f}s"
 
 
 @pytest.mark.asyncio
@@ -190,3 +191,32 @@ async def test_guard_survives_instance_recreation():
         await task1
 
     assert _ads_module._discovery_precache_running is False
+
+
+@pytest.mark.asyncio
+async def test_worker_timeout_fires_and_updates_progress():
+    """A worker that exceeds the per-artist timeout is killed and progress is updated."""
+    svc = _make_service()
+
+    async def hang_forever(*args, **kwargs):
+        await asyncio.sleep(9999)
+        return MagicMock()  # pragma: no cover
+
+    status = MagicMock()
+    status.is_cancelled = MagicMock(return_value=False)
+    status.update_progress = AsyncMock()
+
+    with (
+        patch.object(svc, "get_similar_artists", new_callable=AsyncMock, side_effect=hang_forever),
+        patch.object(svc, "get_top_songs", new_callable=AsyncMock, side_effect=hang_forever),
+        patch.object(svc, "get_top_albums", new_callable=AsyncMock, side_effect=hang_forever),
+        patch("services.artist_discovery_service._DISCOVERY_WORKER_TIMEOUT", 0.1),
+    ):
+        result = await svc.precache_artist_discovery(
+            ["mbid-a"], delay=0, status_service=status,
+        )
+
+    assert result == 0
+    assert status.update_progress.await_count >= 1
+    last_call_args = status.update_progress.call_args
+    assert "timed out" in str(last_call_args)
