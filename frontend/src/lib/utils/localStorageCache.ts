@@ -73,7 +73,7 @@ export function createLocalStorageCache<T>(
 		return key.startsWith(keyPrefix);
 	}
 
-	function isQuotaExceededError(error: unknown): boolean {
+	function _isQuotaExceededError(error: unknown): boolean {
 		if (!(error instanceof DOMException)) return false;
 		return (
 			error.code === 22 ||
@@ -128,10 +128,7 @@ export function createLocalStorageCache<T>(
 		try {
 			localStorage.setItem(key, payload);
 			return true;
-		} catch (error) {
-			if (!isQuotaExceededError(error)) {
-				console.warn(`[localStorageCache] Failed to write key "${key}":`, error);
-			}
+		} catch {
 			return false;
 		}
 	}
@@ -172,8 +169,6 @@ export function createLocalStorageCache<T>(
 			enforceMaxEntriesLimit();
 			return;
 		}
-
-		console.warn(`[localStorageCache] Storage quota exceeded for key "${key}".`);
 	}
 
 	function remove(suffix?: string): void {

@@ -88,7 +88,6 @@ class PlaylistService:
         if len(stripped) > MAX_NAME_LENGTH:
             raise InvalidPlaylistDataError(f"Playlist name must not exceed {MAX_NAME_LENGTH} characters")
         result = await self._repo.create_playlist(stripped, source_ref=source_ref)
-        logger.info("Playlist created: id=%s name=%s source_ref=%s", result.id, result.name, source_ref)
         return result
 
     async def get_by_source_ref(self, source_ref: str) -> PlaylistRecord | None:
@@ -127,7 +126,6 @@ class PlaylistService:
         result = await self._repo.update_playlist(playlist_id, name=name)
         if result is None:
             raise PlaylistNotFoundError(f"Playlist {playlist_id} not found")
-        logger.info("Playlist updated: id=%s", playlist_id)
         return result
 
     async def update_playlist_with_detail(
@@ -142,7 +140,6 @@ class PlaylistService:
         if not deleted:
             raise PlaylistNotFoundError(f"Playlist {playlist_id} not found")
         await asyncio.to_thread(self._delete_cover_file, playlist_id)
-        logger.info("Playlist deleted: id=%s", playlist_id)
 
 
     async def add_tracks(
@@ -177,14 +174,12 @@ class PlaylistService:
             normalized_tracks.append(normalized)
         await self.get_playlist(playlist_id)
         result = await self._repo.add_tracks(playlist_id, normalized_tracks, position)
-        logger.info("Added %d tracks to playlist %s", len(result), playlist_id)
         return result
 
     async def remove_track(self, playlist_id: str, track_id: str) -> None:
         removed = await self._repo.remove_track(playlist_id, track_id)
         if not removed:
             raise PlaylistNotFoundError(f"Track {track_id} not found in playlist {playlist_id}")
-        logger.info("Removed track %s from playlist %s", track_id, playlist_id)
 
     async def remove_tracks(self, playlist_id: str, track_ids: list[str]) -> int:
         if not track_ids:
@@ -192,7 +187,6 @@ class PlaylistService:
         removed = await self._repo.remove_tracks(playlist_id, track_ids)
         if not removed:
             raise PlaylistNotFoundError(f"No matching tracks found in playlist {playlist_id}")
-        logger.info("Removed %d tracks from playlist %s", removed, playlist_id)
         return removed
 
     async def reorder_track(
@@ -203,7 +197,6 @@ class PlaylistService:
         result = await self._repo.reorder_track(playlist_id, track_id, new_position)
         if result is None:
             raise PlaylistNotFoundError(f"Track {track_id} not found in playlist {playlist_id}")
-        logger.info("Reordered track %s to position %d in playlist %s", track_id, result, playlist_id)
         return result
 
     async def update_track_source(
@@ -259,7 +252,6 @@ class PlaylistService:
         )
         if result is None:
             raise PlaylistNotFoundError(f"Track {track_id} not found in playlist {playlist_id}")
-        logger.info("Updated track source: track=%s playlist=%s", track_id, playlist_id)
         return result
 
     async def get_tracks(self, playlist_id: str) -> list[PlaylistTrackRecord]:

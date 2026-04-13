@@ -285,7 +285,6 @@ class HomeService:
                 items=preview_items,
             )
         except Exception as e:  # noqa: BLE001
-            logger.debug(f"Could not build discover preview: {e}")
             return None
 
     async def _resolve_release_mbids(self, release_ids: list[str]) -> dict[str, str]:

@@ -6,11 +6,6 @@ import type {
 } from '@tanstack/svelte-query-persist-client';
 import { del, entries, get, set } from 'idb-keyval';
 
-/**
- * Creates an Indexed DB persister
- * @see https://developer.mozilla.org/en-US/docs/Web/API/IndexedDB_API
- * @see https://tanstack.com/query/latest/docs/framework/react/plugins/persistQueryClient#building-a-persister
- */
 export function createIDBPersister(idbValidKey: string = 'tanstackQuery') {
 	return {
 		persistClient: async (client: PersistedClient) => {

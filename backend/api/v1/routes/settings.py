@@ -60,7 +60,6 @@ async def update_preferences(
     try:
         preferences_service.save_preferences(preferences)
         total_cleared = await settings_service.clear_caches_for_preference_change()
-        logger.info(f"Updated user preferences. Cleared {total_cleared} cache entries.")
         return preferences
     except ConfigurationError as e:
         logger.warning(f"Configuration error updating preferences: {e}")
@@ -81,7 +80,6 @@ async def update_lidarr_settings(
 ):
     try:
         preferences_service.save_lidarr_settings(lidarr_settings)
-        logger.info(f"Updated Lidarr settings: sync_frequency={lidarr_settings.sync_frequency}")
         return lidarr_settings
     except ConfigurationError as e:
         logger.warning(f"Configuration error updating Lidarr settings: {e}")
@@ -132,7 +130,6 @@ async def update_advanced_settings(
             )
         preferences_service.save_advanced_settings(backend_settings)
         await settings_service.on_coverart_settings_changed()
-        logger.info("Updated advanced settings")
         saved = preferences_service.get_advanced_settings()
         return AdvancedSettingsFrontend.from_backend(saved)
     except ConfigurationError as e:
@@ -162,7 +159,6 @@ async def update_lidarr_connection(
         preferences_service.save_lidarr_connection(settings)
         reset_lidarr_circuit_breaker()
         await settings_service.on_lidarr_settings_changed()
-        logger.info("Updated Lidarr connection settings")
         return settings
     except ConfigurationError as e:
         logger.warning(f"Configuration error updating Lidarr connection: {e}")
@@ -242,7 +238,6 @@ async def update_jellyfin_settings(
     try:
         preferences_service.save_jellyfin_connection(settings)
         await settings_service.on_jellyfin_settings_changed()
-        logger.info("Updated Jellyfin connection settings")
         return settings
     except ConfigurationError as e:
         logger.warning(f"Configuration error updating Jellyfin settings: {e}")
@@ -275,7 +270,6 @@ async def update_navidrome_settings(
     try:
         preferences_service.save_navidrome_connection(settings)
         await settings_service.on_navidrome_settings_changed(enabled=settings.enabled)
-        logger.info("Updated Navidrome connection settings")
         return preferences_service.get_navidrome_connection()
     except ConfigurationError as e:
         logger.warning("Configuration error updating Navidrome settings: %s", e)
@@ -354,7 +348,6 @@ async def update_listenbrainz_settings(
     try:
         preferences_service.save_listenbrainz_connection(settings)
         await settings_service.on_listenbrainz_settings_changed()
-        logger.info("Updated ListenBrainz connection settings")
         return settings
     except ConfigurationError as e:
         logger.warning(f"Configuration error updating ListenBrainz settings: {e}")
@@ -386,7 +379,6 @@ async def update_youtube_settings(
     try:
         preferences_service.save_youtube_connection(settings)
         await settings_service.on_youtube_settings_changed()
-        logger.info("Updated YouTube connection settings")
         return settings
     except ConfigurationError as e:
         logger.warning(f"Configuration error updating YouTube settings: {e}")
@@ -418,7 +410,6 @@ async def update_home_settings(
     try:
         preferences_service.save_home_settings(settings)
         await settings_service.clear_home_cache()
-        logger.info("Updated home settings")
         return settings
     except ConfigurationError as e:
         logger.warning(f"Configuration error updating home settings: {e}")
@@ -441,7 +432,6 @@ async def update_local_files_settings(
     try:
         preferences_service.save_local_files_connection(settings)
         await settings_service.on_local_files_settings_changed()
-        logger.info("Updated local files settings")
         return settings
     except ConfigurationError as e:
         logger.warning("Configuration error updating local files settings: %s", e)
@@ -473,7 +463,6 @@ async def update_lastfm_settings(
     try:
         preferences_service.save_lastfm_connection(settings)
         await settings_service.on_lastfm_settings_changed()
-        logger.info("Updated Last.fm connection settings")
         saved = preferences_service.get_lastfm_connection()
         return LastFmConnectionSettingsResponse.from_settings(saved)
     except ConfigurationError as e:
@@ -504,7 +493,6 @@ async def update_scrobble_settings(
 ):
     try:
         preferences_service.save_scrobble_settings(settings)
-        logger.info("Updated scrobble settings")
         return preferences_service.get_scrobble_settings()
     except ConfigurationError as e:
         logger.warning("Configuration error updating scrobble settings: %s", e)
@@ -528,7 +516,6 @@ async def update_primary_music_source(
         preferences_service.save_primary_music_source(settings)
         await settings_service.clear_home_cache()
         await settings_service.clear_source_resolution_cache()
-        logger.info("Updated primary music source to %s", settings.source)
         return preferences_service.get_primary_music_source()
     except ConfigurationError as e:
         logger.warning("Configuration error updating primary music source: %s", e)

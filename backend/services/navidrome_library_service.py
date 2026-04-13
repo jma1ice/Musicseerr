@@ -106,7 +106,6 @@ class NavidromeLibraryService:
             del self._album_mbid_cache[key]
         if stale_keys:
             self._dirty = True
-            logger.debug("navidrome.cache action=invalidate mbid=%s cleared_keys=%d", album_mbid[:8], len(stale_keys))
 
     async def _resolve_album_mbid(self, name: str, artist: str) -> str | None:
         """Resolve a release-group MBID for an album via Lidarr library matching."""
@@ -180,7 +179,6 @@ class NavidromeLibraryService:
             await self._mbid_store.save_navidrome_album_mbid_index(serializable_albums)
             await self._mbid_store.save_navidrome_artist_mbid_index(serializable_artists)
             self._dirty = False
-            logger.debug("Persisted dirty Navidrome MBID cache to disk")
         except Exception:  # noqa: BLE001
             logger.warning("Failed to persist dirty Navidrome MBID cache", exc_info=True)
 
@@ -763,10 +761,6 @@ class NavidromeLibraryService:
                     norm_artist = _normalize(artist_name)
                     if norm_artist and artist_mbid:
                         self._lidarr_artist_index[norm_artist] = artist_mbid
-                logger.info(
-                    "Built Lidarr matching indices: %d album entries, %d artist entries",
-                    len(self._lidarr_album_index), len(self._lidarr_artist_index),
-                )
             except Exception:  # noqa: BLE001
                 logger.warning("Failed to build Lidarr matching indices", exc_info=True)
 
@@ -779,10 +773,6 @@ class NavidromeLibraryService:
                     self._album_mbid_cache.update(disk_albums)
                     self._artist_mbid_cache.update(disk_artists)
                     loaded_from_disk = True
-                    logger.info(
-                        "Loaded Navidrome MBID cache from disk: %d albums, %d artists",
-                        len(disk_albums), len(disk_artists),
-                    )
             except Exception:  # noqa: BLE001
                 logger.warning("Failed to load Navidrome MBID cache from disk", exc_info=True)
 
@@ -821,11 +811,6 @@ class NavidromeLibraryService:
             del self._album_mbid_cache[key]
         for key in stale_artist_keys:
             del self._artist_mbid_cache[key]
-        if stale_album_keys or stale_artist_keys:
-            logger.info(
-                "Removed %d stale album and %d stale artist MBID entries",
-                len(stale_album_keys), len(stale_artist_keys),
-            )
 
         resolved_albums = 0
         resolved_artists = 0
@@ -881,11 +866,6 @@ class NavidromeLibraryService:
                 if mbid:
                     resolved_artists += 1
 
-        logger.info(
-            "Navidrome MBID enrichment complete: %d new albums resolved, %d new artists resolved (loaded_from_disk=%s, lidarr_available=%s)",
-            resolved_albums, resolved_artists, loaded_from_disk, bool(self._lidarr_album_index),
-        )
-
         if self._mbid_store and (self._dirty or stale_album_keys or stale_artist_keys):
             try:
                 serializable_albums = {k: (v if isinstance(v, str) else None) for k, v in self._album_mbid_cache.items()}
@@ -893,10 +873,6 @@ class NavidromeLibraryService:
                 await self._mbid_store.save_navidrome_album_mbid_index(serializable_albums)
                 await self._mbid_store.save_navidrome_artist_mbid_index(serializable_artists)
                 self._dirty = False
-                logger.info(
-                    "Persisted Navidrome MBID cache to disk: %d albums, %d artists",
-                    len(self._album_mbid_cache), len(self._artist_mbid_cache),
-                )
             except Exception:  # noqa: BLE001
                 logger.warning("Failed to persist Navidrome MBID cache to disk", exc_info=True)
 

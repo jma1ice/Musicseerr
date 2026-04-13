@@ -26,8 +26,8 @@ async function load(): Promise<void> {
 			directRemoteImagesEnabled: data.direct_remote_images_enabled ?? true
 		});
 		lastFetch = now;
-	} catch (e) {
-		console.warn('Failed to load image settings:', e);
+	} catch {
+		// use defaults on fetch failure
 	}
 }
 
