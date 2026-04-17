@@ -1180,6 +1180,7 @@ export type LocalTrackInfo = {
 
 export type LocalAlbumMatch = {
 	found: boolean;
+	lidarr_album_id?: number | null;
 	tracks: LocalTrackInfo[];
 	total_size_bytes: number;
 	primary_format?: string | null;

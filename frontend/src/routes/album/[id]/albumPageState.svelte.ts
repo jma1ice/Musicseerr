@@ -43,6 +43,8 @@ import { launchJellyfinPlayback } from '$lib/player/launchJellyfinPlayback';
 import { launchLocalPlayback } from '$lib/player/launchLocalPlayback';
 import { launchNavidromePlayback } from '$lib/player/launchNavidromePlayback';
 import { launchPlexPlayback } from '$lib/player/launchPlexPlayback';
+import { downloadFile } from '$lib/utils/downloadHelper';
+import { API } from '$lib/constants';
 import type { MenuItem } from '$lib/components/ContextMenu.svelte';
 import {
 	fetchAlbumBasic,
@@ -692,6 +694,13 @@ export function createAlbumPageState(albumIdGetter: () => string) {
 		);
 	}
 
+	const localDownloadCallback = $derived<{ callback: (() => void) | undefined }>(
+		(() => {
+			const id = localMatch?.lidarr_album_id;
+			return { callback: id ? () => downloadFile(API.download.localAlbum(id)) : undefined };
+		})()
+	);
+
 	const jellyfinCallbacks: SourceCallbacks = buildSourceCallbacks(
 		() => jellyfinMatch,
 		launchJellyfinPlayback,
@@ -890,6 +899,7 @@ export function createAlbumPageState(albumIdGetter: () => string) {
 		},
 		jellyfinCallbacks,
 		localCallbacks,
+		localDownloadCallback,
 		navidromeCallbacks,
 		plexCallbacks,
 		...eventHandlers,
