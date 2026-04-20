@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 TOKEN_BYTES = 32
 TOKEN_LIFETIME_DAYS = 30
 
+
 class UserRecord(msgspec.Struct, frozen = True):
     id: str
     display_name: str
@@ -23,6 +24,7 @@ class UserRecord(msgspec.Struct, frozen = True):
     email: str | None = None
     avatar_url: str | None = None
 
+
 class AuthProviderRecord(msgspec.Struct, frozen = True):
     id: str
     user_id: str
@@ -30,6 +32,7 @@ class AuthProviderRecord(msgspec.Struct, frozen = True):
     provider_uid: str
     created_at: str
     provider_data: str | None = None
+
 
 class TokenRecord(msgspec.Struct, frozen = True):
     id: str
@@ -40,6 +43,7 @@ class TokenRecord(msgspec.Struct, frozen = True):
     last_seen_at: str
     revoked: bool
     user_agent: str | None = None
+
 
 class AuthStore:
     """SQLite-backed store for auth state.
@@ -491,11 +495,14 @@ class AuthStore:
 
         return await self._write(operation)
 
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
+
 def _expiry_iso() -> str:
     return (datetime.now(timezone.utc) + timedelta(days = TOKEN_LIFETIME_DAYS)).isoformat()
+
 
 def _hash_token(raw_token: str) -> str:
     return hashlib.sha256(raw_token.encode()).hexdigest()
