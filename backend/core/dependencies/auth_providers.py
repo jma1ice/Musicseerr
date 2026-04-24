@@ -42,3 +42,14 @@ def get_jellyfin_user_auth_service() -> "JellyfinUserAuthService":
         jellyfin_repository = get_jellyfin_repository(),
         preferences_service = get_preferences_service(),
     )
+
+
+@singleton
+def get_oidc_user_auth_service() -> "OIDCUserAuthService":
+    from services.oidc_user_auth_service import OIDCUserAuthService
+    from core.dependencies.cache_providers import get_cache
+    return OIDCUserAuthService(
+        auth_store = get_auth_store(),
+        preferences_service = get_preferences_service(),
+        cache = get_cache(),
+    )

@@ -24,6 +24,8 @@ _PUBLIC_PREFIXES: tuple[str, ...] = (
     "/api/v1/docs",
     "/api/v1/redoc",
     "/api/v1/openapi.json",
+    "/api/v1/auth/oidc/callback",
+    "/api/v1/auth/oidc/exchange",
 )
 
 

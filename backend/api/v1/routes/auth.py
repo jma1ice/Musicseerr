@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, responses, status
 
 from api.v1.schemas.auth import (
     AuthResponse,
     CreateUserRequest,
     JellyfinLoginRequest,
     LoginRequest,
+    OIDCAuthorizeResponse,
+    OIDCExchangeRequest,
     PlexPinResponse,
     SessionListResponse,
     SetRoleRequest,
@@ -20,9 +22,10 @@ from api.v1.schemas.auth import (
     session_to_response,
     user_to_response,
 )
-from core.dependencies.auth_providers import get_auth_service, get_plex_user_auth_service, get_jellyfin_user_auth_service
-from core.exceptions import AuthenticationError, ExternalServiceError, RegistrationError
+from core.dependencies.auth_providers import get_auth_service, get_plex_user_auth_service, get_jellyfin_user_auth_service, get_oidc_user_auth_service
+from core.exceptions import AuthenticationError, ConfigurationError, ExternalServiceError, RegistrationError
 from infrastructure.msgspec_fastapi import MsgSpecRoute
+from services.oidc_user_auth_service import OIDCUserAuthService
 from services.auth_service import AuthService
 from services.jellyfin_user_auth_service import JellyfinUserAuthService
 from services.plex_user_auth_service import PlexUserAuthService
@@ -292,4 +295,45 @@ async def jellyfin_login(
             status_code = status.HTTP_503_SERVICE_UNAVAILABLE,
             detail = "Jellyfin unavailable",
         )
+    return AuthResponse(token = token, user = user_to_response(user))
+
+
+@router.post("/oidc/authorize", response_model = OIDCAuthorizeResponse)
+async def oidc_authorize(oidc_auth: OIDCUserAuthService = Depends(get_oidc_user_auth_service)) -> OIDCAuthorizeResponse:
+    try:
+        url = await oidc_auth.build_authorize_url()
+    except ConfigurationError:
+        raise HTTPException(status_code = status.HTTP_503_SERVICE_UNAVAILABLE, detail = "OIDC is not configured")
+    return OIDCAuthorizeResponse(redirect_url = url)
+
+
+@router.get("/oidc/callback")
+async def oidc_callback(
+    code: str,
+    state: str,
+    request: Request,
+    oidc_auth: OIDCUserAuthService = Depends(get_oidc_user_auth_service),
+):
+    try:
+        exchange_code = await oidc_auth.handle_callback(
+            code = code,
+            state = state,
+            user_agent = request.headers.get("User-Agent"),
+        )
+    except AuthenticationError:
+        raise HTTPException(status_code = status.HTTP_401_UNAUTHORIZED, detail = "OIDC authentication failed")
+    except ExternalServiceError:
+        raise HTTPException(status_code = status.HTTP_503_SERVICE_UNAVAILABLE, detail = "OIDC provider unavailable")
+    return responses.RedirectResponse(url = f"/auth/callback?code={exchange_code}")
+
+
+@router.post("/oidc/exchange", response_model = AuthResponse)
+async def oidc_exchange(
+    body: OIDCExchangeRequest,
+    oidc_auth: OIDCUserAuthService = Depends(get_oidc_user_auth_service),
+) -> AuthResponse:
+    try:
+        user, token = await oidc_auth.exchange_code(body.code)
+    except AuthenticationError:
+        raise HTTPException(status_code = status.HTTP_401_UNAUTHORIZED, detail = "Invalid or expired code")
     return AuthResponse(token = token, user = user_to_response(user))

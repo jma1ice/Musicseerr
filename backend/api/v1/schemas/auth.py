@@ -71,6 +71,14 @@ class JellyfinLoginRequest(msgspec.Struct, frozen = True):
     password: str
 
 
+class OIDCAuthorizeResponse(msgspec.Struct, frozen = True):
+    redirect_url: str
+
+
+class OIDCExchangeRequest(msgspec.Struct, frozen = True):
+    code: str
+
+
 def user_to_response(user) -> UserResponse:
     return UserResponse(
         id = user.id,
