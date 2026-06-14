@@ -114,7 +114,6 @@ class PlexHubResponse(AppStruct):
     recently_added: list[PlexAlbumSummary] = []
     all_albums_preview: list[PlexAlbumSummary] = []
     genres: list[str] = []
-    playlists: list[PlexPlaylistSummary] = []
 
 
 class PlexDiscoveryAlbum(AppStruct):
@@ -147,6 +146,7 @@ class PlexPlaylistTrack(AppStruct):
     album_name: str = ""
     album_id: str = ""
     plex_rating_key: str = ""
+    part_key: str = ""
     duration_seconds: int = 0
     track_number: int = 0
     disc_number: int = 1

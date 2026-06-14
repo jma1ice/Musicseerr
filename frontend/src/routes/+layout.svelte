@@ -3,6 +3,9 @@
 	import { browser } from '$app/environment';
 	import { goto, beforeNavigate, afterNavigate } from '$app/navigation';
 	import { resolve } from '$app/paths';
+	import { page } from '$app/state';
+	import { AUTH_FREE_PATHS } from '$lib/constants';
+	import { authStore } from '$lib/stores/authStore.svelte';
 	import { migratePageSourceKeys } from '$lib/stores/musicSource';
 	import { errorModal } from '$lib/stores/errorModal';
 	import { libraryStore } from '$lib/stores/library';
@@ -14,7 +17,7 @@
 	import { scrobbleManager } from '$lib/stores/scrobble.svelte';
 	import { imageSettingsStore } from '$lib/stores/imageSettings';
 	import { serviceStatusStore } from '$lib/stores/serviceStatus';
-	import { setAudioElement, tryGetAudioEngine } from '$lib/player/audioElement';
+	import { resumeAudioEngine, setAudioElement } from '$lib/player/audioElement';
 	import { eqStore } from '$lib/stores/eq.svelte';
 	import Player from '$lib/components/Player.svelte';
 	import CacheSyncIndicator from '$lib/components/CacheSyncIndicator.svelte';
@@ -38,6 +41,7 @@
 	import { cancelPendingImages } from '$lib/utils/lazyImage';
 	import { abortAllPageRequests } from '$lib/utils/navigationAbort';
 	import { requestCountStore } from '$lib/stores/requestCountStore.svelte';
+	import { pendingApprovalCountStore } from '$lib/stores/pendingApprovalCountStore.svelte';
 	import { nowPlayingMerged } from '$lib/stores/nowPlayingMerged.svelte';
 	import { nowPlayingStore } from '$lib/stores/nowPlayingSessions.svelte';
 	import SidebarVisualiser from '$lib/components/SidebarVisualiser.svelte';
@@ -57,7 +61,9 @@
 		X,
 		UserRound,
 		ListMusic,
-		ArrowUpCircle
+		ArrowUpCircle,
+		LogOut,
+		ShieldCheck
 	} from 'lucide-svelte';
 	import type { Snippet } from 'svelte';
 	import QueryProvider from '$lib/queries/QueryProvider.svelte';
@@ -112,7 +118,7 @@
 		}
 
 		const resumeAudioContext = () => {
-			tryGetAudioEngine()?.resume();
+			void resumeAudioEngine();
 			cleanupResumeListeners?.();
 			cleanupResumeListeners = null;
 		};
@@ -143,6 +149,7 @@
 			void restorePlayerSession();
 			void scrobbleManager.init();
 			requestCountStore.startPolling();
+			if (authStore.isAdmin) pendingApprovalCountStore.startPolling();
 			syncStatus.connect();
 		});
 		integrationStore.ensureLoaded().then(() => {
@@ -158,6 +165,7 @@
 			document.removeEventListener('keydown', handleGlobalKeydown);
 		}
 		requestCountStore.stopPolling();
+		pendingApprovalCountStore.stopPolling();
 		syncStatus.disconnect();
 		nowPlayingStore.stop();
 		unregisterPlaylistModal();
@@ -247,6 +255,19 @@
 
 	const integrations = fromStore(integrationStore);
 	const lidarrConfigured = $derived(integrations.current.lidarr || !integrations.current.loaded);
+	// Lidarr-backed nav (Library, Playlists, Requests) shows greyed + non-clickable until Lidarr is connected.
+	const lidarrDisabled = $derived(!lidarrConfigured);
+	const showAppShell = $derived(!AUTH_FREE_PATHS.some((p) => page.url.pathname.startsWith(p)));
+
+	async function handleLogout() {
+		try {
+			await fetch('/api/v1/auth/logout', { method: 'POST', credentials: 'include' });
+		} catch {
+			// ignore
+		}
+		authStore.clear();
+		goto('/login');
+	}
 </script>
 
 <QueryProvider>
@@ -257,95 +278,100 @@
 			</div>
 		{/if}
 
-		<DegradedBanner />
-		<VersionOverlays bind:updateAvailable={versionUpdateAvailable} />
+		{#if showAppShell}
+			<DegradedBanner />
+			<VersionOverlays bind:updateAvailable={versionUpdateAvailable} />
 
-		<div class="drawer lg:drawer-open">
-			<input id="main-drawer" type="checkbox" class="drawer-toggle" />
+			<div class="drawer md:drawer-open">
+				<input id="main-drawer" type="checkbox" class="drawer-toggle" />
 
-			<div class="drawer-content flex min-w-0 flex-col">
-				<div
-					class="musicseerr-topbar navbar bg-base-100/95 backdrop-blur shadow-sm sticky top-0 z-50"
-				>
-					<div class="navbar-start w-auto">
-						<a href="/" class="btn btn-ghost px-2 max-xs:hidden sm:px-4" aria-label="Home">
-							<img src="/logo_wide.png" alt="Musicseerr" class="h-8 hidden sm:block" />
-							<img src="/logo_icon.png" alt="Musicseerr" class="h-8 block sm:hidden" />
-						</a>
-					</div>
-					<div class="navbar-center min-w-0 grow justify-center px-1 sm:px-4">
-						<div class="w-full max-w-2xl">
-							<SearchSuggestions
-								bind:query
-								onSearch={handleSearch}
-								onSelect={handleSuggestionSelect}
-								id="navbar-suggest"
-							/>
+				<div class="drawer-content flex min-w-0 flex-col">
+					<div
+						class="musicseerr-topbar navbar bg-base-100/95 backdrop-blur shadow-sm sticky top-0 z-50"
+					>
+						<div class="navbar-start w-auto">
+							<a href="/" class="btn btn-ghost px-2 max-xs:hidden sm:px-4" aria-label="Home">
+								<img src="/logo_wide.png" alt="Musicseerr" class="h-8 hidden sm:block" />
+								<img src="/logo_icon.png" alt="Musicseerr" class="h-8 block sm:hidden" />
+							</a>
+						</div>
+						<div class="navbar-center min-w-0 grow justify-center px-1 sm:px-4">
+							<div class="w-full max-w-2xl">
+								<SearchSuggestions
+									bind:query
+									onSearch={handleSearch}
+									onSelect={handleSuggestionSelect}
+									id="navbar-suggest"
+								/>
+							</div>
+						</div>
+						<div class="navbar-end w-auto pr-1 sm:pr-2">
+							<a href="/profile" class="btn btn-ghost btn-circle btn-md" aria-label="Profile">
+								<UserRound class="h-6 w-6" />
+							</a>
 						</div>
 					</div>
-					<div class="navbar-end w-auto pr-1 sm:pr-2">
-						<a href="/profile" class="btn btn-ghost btn-circle btn-md" aria-label="Profile">
-							<UserRound class="h-6 w-6" />
-						</a>
+
+					<div
+						class="musicseerr-main-content flex-1"
+						class:musicseerr-player-visible={playerStore.isPlayerVisible}
+					>
+						{@render children()}
 					</div>
 				</div>
 
-				<div
-					class="musicseerr-main-content flex-1"
-					class:musicseerr-player-visible={playerStore.isPlayerVisible}
-				>
-					{@render children()}
-				</div>
-			</div>
+				<div class="drawer-side hidden md:block is-drawer-close:overflow-visible">
+					<label for="main-drawer" aria-label="close sidebar" class="drawer-overlay"></label>
+					<div
+						class="is-drawer-close:w-16 is-drawer-open:w-64 bg-base-200 flex flex-col items-start min-h-full"
+					>
+						<ul class="menu w-full grow p-2 [&_li>*]:py-3">
+							<li>
+								<button
+									onclick={() =>
+										(document.getElementById('search_modal') as HTMLDialogElement)?.showModal()}
+									class="is-drawer-close:tooltip is-drawer-close:tooltip-right"
+									data-tip="Search"
+								>
+									<Search class="h-6 w-6" />
+									<span class="is-drawer-close:hidden">Search</span>
+								</button>
+							</li>
 
-			<div class="drawer-side hidden lg:block is-drawer-close:overflow-visible">
-				<label for="main-drawer" aria-label="close sidebar" class="drawer-overlay"></label>
-				<div
-					class="is-drawer-close:w-16 is-drawer-open:w-64 bg-base-200 flex flex-col items-start min-h-full"
-				>
-					<ul class="menu w-full grow p-2 [&_li>*]:py-3">
-						<li>
-							<button
-								onclick={() =>
-									(document.getElementById('search_modal') as HTMLDialogElement)?.showModal()}
-								class="is-drawer-close:tooltip is-drawer-close:tooltip-right"
-								data-tip="Search"
-							>
-								<Search class="h-6 w-6" />
-								<span class="is-drawer-close:hidden">Search</span>
-							</button>
-						</li>
+							<div class="divider my-0"></div>
 
-						<div class="divider my-0"></div>
-
-						<li>
-							<a
-								href="/"
-								class="is-drawer-close:tooltip is-drawer-close:tooltip-right"
-								data-tip="Home"
-							>
-								<House class="h-6 w-6" />
-								<span class="is-drawer-close:hidden">Home</span>
-							</a>
-						</li>
-
-						<li>
-							<a
-								href="/discover"
-								class="is-drawer-close:tooltip is-drawer-close:tooltip-right"
-								data-tip="Discover"
-							>
-								<Compass class="h-6 w-6" />
-								<span class="is-drawer-close:hidden">Discover</span>
-							</a>
-						</li>
-
-						{#if lidarrConfigured}
 							<li>
 								<a
-									href="/library"
+									href="/"
 									class="is-drawer-close:tooltip is-drawer-close:tooltip-right"
-									data-tip="Library"
+									data-tip="Home"
+								>
+									<House class="h-6 w-6" />
+									<span class="is-drawer-close:hidden">Home</span>
+								</a>
+							</li>
+
+							<li>
+								<a
+									href="/discover"
+									class="is-drawer-close:tooltip is-drawer-close:tooltip-right"
+									data-tip="Discover"
+								>
+									<Compass class="h-6 w-6" />
+									<span class="is-drawer-close:hidden">Discover</span>
+								</a>
+							</li>
+
+							<li>
+								<a
+									href={lidarrDisabled ? undefined : '/library'}
+									aria-disabled={lidarrDisabled ? 'true' : undefined}
+									class="is-drawer-close:tooltip is-drawer-close:tooltip-right"
+									class:tooltip={lidarrDisabled}
+									class:tooltip-right={lidarrDisabled}
+									class:opacity-40={lidarrDisabled}
+									class:cursor-not-allowed={lidarrDisabled}
+									data-tip={lidarrDisabled ? 'Connect Lidarr in Settings to enable' : 'Library'}
 								>
 									<div class="relative">
 										<Menu class="h-6 w-6" />
@@ -362,161 +388,171 @@
 
 							<li>
 								<a
-									href="/playlists"
+									href={lidarrDisabled ? undefined : '/playlists'}
+									aria-disabled={lidarrDisabled ? 'true' : undefined}
 									class="is-drawer-close:tooltip is-drawer-close:tooltip-right"
-									class:menu-active={isNavActive('/playlists')}
-									aria-current={isNavActive('/playlists') ? 'page' : undefined}
-									data-tip="Playlists"
+									class:tooltip={lidarrDisabled}
+									class:tooltip-right={lidarrDisabled}
+									class:opacity-40={lidarrDisabled}
+									class:cursor-not-allowed={lidarrDisabled}
+									class:menu-active={!lidarrDisabled && isNavActive('/playlists')}
+									aria-current={!lidarrDisabled && isNavActive('/playlists') ? 'page' : undefined}
+									data-tip={lidarrDisabled ? 'Connect Lidarr in Settings to enable' : 'Playlists'}
 								>
 									<ListMusic class="h-6 w-6" />
 									<span class="is-drawer-close:hidden">Playlists</span>
 								</a>
 							</li>
-						{/if}
 
-						{#if integrations.current.loaded}
-							<div class="divider my-0"></div>
-						{/if}
+							{#if integrations.current.loaded}
+								<div class="divider my-0"></div>
+							{/if}
 
-						{#if integrations.current.youtube}
-							<li>
-								<a
-									href="/library/youtube"
-									class="is-drawer-close:tooltip is-drawer-close:tooltip-right"
-									data-tip="YouTube"
-								>
-									<YouTubeIcon class="h-6 w-6 text-error" />
-									<span class="is-drawer-close:hidden">YouTube</span>
-								</a>
-							</li>
-						{:else if integrations.current.loaded}
-							<SidebarServiceHint label="YouTube" settingsTab="youtube">
-								{#snippet icon()}<YouTubeIcon class="h-6 w-6 text-error" />{/snippet}
-							</SidebarServiceHint>
-						{/if}
+							{#if integrations.current.youtube}
+								<li>
+									<a
+										href="/library/youtube"
+										class="is-drawer-close:tooltip is-drawer-close:tooltip-right"
+										data-tip="YouTube"
+									>
+										<YouTubeIcon class="h-6 w-6 text-error" />
+										<span class="is-drawer-close:hidden">YouTube</span>
+									</a>
+								</li>
+							{:else if integrations.current.loaded && authStore.isAdmin}
+								<SidebarServiceHint label="YouTube" settingsTab="youtube">
+									{#snippet icon()}<YouTubeIcon class="h-6 w-6 text-error" />{/snippet}
+								</SidebarServiceHint>
+							{/if}
 
-						{#if integrations.current.jellyfin}
-							<li>
-								<a
-									href="/library/jellyfin"
-									class="is-drawer-close:tooltip is-drawer-close:tooltip-right"
-									data-tip="Jellyfin"
-								>
-									<div class="relative inline-flex">
-										<JellyfinIcon class="h-6 w-6 text-info" />
+							{#if integrations.current.jellyfin}
+								<li>
+									<a
+										href="/library/jellyfin"
+										class="is-drawer-close:tooltip is-drawer-close:tooltip-right"
+										data-tip="Jellyfin"
+									>
+										<div class="relative inline-flex">
+											<JellyfinIcon class="h-6 w-6 text-info" />
+											{#if nowPlayingMerged.isSourcePlaying('jellyfin')}
+												<span
+													class="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-primary animate-pulse"
+												></span>
+											{/if}
+										</div>
+										<span class="is-drawer-close:hidden">Jellyfin</span>
 										{#if nowPlayingMerged.isSourcePlaying('jellyfin')}
-											<span
-												class="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-primary animate-pulse"
-											></span>
+											<div
+												class="now-playing-bars now-playing-bars--sm ml-auto is-drawer-close:hidden"
+											>
+												<span></span><span></span><span></span>
+											</div>
 										{/if}
-									</div>
-									<span class="is-drawer-close:hidden">Jellyfin</span>
-									{#if nowPlayingMerged.isSourcePlaying('jellyfin')}
-										<div
-											class="now-playing-bars now-playing-bars--sm ml-auto is-drawer-close:hidden"
-										>
-											<span></span><span></span><span></span>
-										</div>
-									{/if}
-								</a>
-							</li>
-						{:else if integrations.current.loaded}
-							<SidebarServiceHint label="Jellyfin" settingsTab="jellyfin">
-								{#snippet icon()}<JellyfinIcon class="h-6 w-6 text-info" />{/snippet}
-							</SidebarServiceHint>
-						{/if}
+									</a>
+								</li>
+							{:else if integrations.current.loaded && authStore.isAdmin}
+								<SidebarServiceHint label="Jellyfin" settingsTab="jellyfin">
+									{#snippet icon()}<JellyfinIcon class="h-6 w-6 text-info" />{/snippet}
+								</SidebarServiceHint>
+							{/if}
 
-						{#if integrations.current.navidrome}
-							<li>
-								<a
-									href="/library/navidrome"
-									class="is-drawer-close:tooltip is-drawer-close:tooltip-right"
-									data-tip="Navidrome"
-								>
-									<div class="relative inline-flex">
-										<NavidromeIcon class="h-6 w-6 text-primary" />
+							{#if integrations.current.navidrome}
+								<li>
+									<a
+										href="/library/navidrome"
+										class="is-drawer-close:tooltip is-drawer-close:tooltip-right"
+										data-tip="Navidrome"
+									>
+										<div class="relative inline-flex">
+											<NavidromeIcon class="h-6 w-6 text-primary" />
+											{#if nowPlayingMerged.isSourcePlaying('navidrome')}
+												<span
+													class="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-primary animate-pulse"
+												></span>
+											{/if}
+										</div>
+										<span class="is-drawer-close:hidden">Navidrome</span>
 										{#if nowPlayingMerged.isSourcePlaying('navidrome')}
-											<span
-												class="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-primary animate-pulse"
-											></span>
+											<div
+												class="now-playing-bars now-playing-bars--sm ml-auto is-drawer-close:hidden"
+											>
+												<span></span><span></span><span></span>
+											</div>
 										{/if}
-									</div>
-									<span class="is-drawer-close:hidden">Navidrome</span>
-									{#if nowPlayingMerged.isSourcePlaying('navidrome')}
-										<div
-											class="now-playing-bars now-playing-bars--sm ml-auto is-drawer-close:hidden"
-										>
-											<span></span><span></span><span></span>
-										</div>
-									{/if}
-								</a>
-							</li>
-						{:else if integrations.current.loaded}
-							<SidebarServiceHint label="Navidrome" settingsTab="navidrome">
-								{#snippet icon()}<NavidromeIcon class="h-6 w-6 text-primary" />{/snippet}
-							</SidebarServiceHint>
-						{/if}
+									</a>
+								</li>
+							{:else if integrations.current.loaded && authStore.isAdmin}
+								<SidebarServiceHint label="Navidrome" settingsTab="navidrome">
+									{#snippet icon()}<NavidromeIcon class="h-6 w-6 text-primary" />{/snippet}
+								</SidebarServiceHint>
+							{/if}
 
-						{#if integrations.current.plex}
-							<li>
-								<a
-									href="/library/plex"
-									class="is-drawer-close:tooltip is-drawer-close:tooltip-right"
-									data-tip="Plex"
-								>
-									<div class="relative inline-flex">
-										<PlexIcon class="h-6 w-6" style="color: rgb(var(--brand-plex))" />
+							{#if integrations.current.plex}
+								<li>
+									<a
+										href="/library/plex"
+										class="is-drawer-close:tooltip is-drawer-close:tooltip-right"
+										data-tip="Plex"
+									>
+										<div class="relative inline-flex">
+											<PlexIcon class="h-6 w-6" style="color: rgb(var(--brand-plex))" />
+											{#if nowPlayingMerged.isSourcePlaying('plex')}
+												<span
+													class="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-primary animate-pulse"
+												></span>
+											{/if}
+										</div>
+										<span class="is-drawer-close:hidden">Plex</span>
 										{#if nowPlayingMerged.isSourcePlaying('plex')}
-											<span
-												class="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-primary animate-pulse"
-											></span>
+											<div
+												class="now-playing-bars now-playing-bars--sm ml-auto is-drawer-close:hidden"
+											>
+												<span></span><span></span><span></span>
+											</div>
 										{/if}
-									</div>
-									<span class="is-drawer-close:hidden">Plex</span>
-									{#if nowPlayingMerged.isSourcePlaying('plex')}
-										<div
-											class="now-playing-bars now-playing-bars--sm ml-auto is-drawer-close:hidden"
-										>
-											<span></span><span></span><span></span>
-										</div>
-									{/if}
-								</a>
-							</li>
-						{:else if integrations.current.loaded}
-							<SidebarServiceHint label="Plex" settingsTab="plex">
-								{#snippet icon()}<PlexIcon
-										class="h-6 w-6"
-										style="color: rgb(var(--brand-plex))"
-									/>{/snippet}
-							</SidebarServiceHint>
-						{/if}
+									</a>
+								</li>
+							{:else if integrations.current.loaded && authStore.isAdmin}
+								<SidebarServiceHint label="Plex" settingsTab="plex">
+									{#snippet icon()}<PlexIcon
+											class="h-6 w-6"
+											style="color: rgb(var(--brand-plex))"
+										/>{/snippet}
+								</SidebarServiceHint>
+							{/if}
 
-						{#if integrations.current.localfiles}
-							<li>
-								<a
-									href="/library/local"
-									class="is-drawer-close:tooltip is-drawer-close:tooltip-right"
-									data-tip="Local Files"
-								>
-									<Headphones class="h-6 w-6 text-accent" />
-									<span class="is-drawer-close:hidden">Local Files</span>
-								</a>
-							</li>
-						{:else if integrations.current.loaded}
-							<SidebarServiceHint label="Local Files" settingsTab="local-files">
-								{#snippet icon()}<Headphones class="h-6 w-6 text-accent" />{/snippet}
-							</SidebarServiceHint>
-						{/if}
+							{#if integrations.current.localfiles}
+								<li>
+									<a
+										href="/library/local"
+										class="is-drawer-close:tooltip is-drawer-close:tooltip-right"
+										data-tip="Local Files"
+									>
+										<Headphones class="h-6 w-6 text-accent" />
+										<span class="is-drawer-close:hidden">Local Files</span>
+									</a>
+								</li>
+							{:else if integrations.current.loaded && authStore.isAdmin}
+								<SidebarServiceHint label="Local Files" settingsTab="local-files">
+									{#snippet icon()}<Headphones class="h-6 w-6 text-accent" />{/snippet}
+								</SidebarServiceHint>
+							{/if}
 
-						<SidebarVisualiser />
+							{#if authStore.isAdmin}
+								<SidebarVisualiser />
+							{/if}
 
-						{#if lidarrConfigured}
 							<div class="divider my-0"></div>
 							<li>
 								<a
-									href="/requests"
+									href={lidarrDisabled ? undefined : '/requests'}
+									aria-disabled={lidarrDisabled ? 'true' : undefined}
 									class="is-drawer-close:tooltip is-drawer-close:tooltip-right"
-									data-tip="Requests"
+									class:tooltip={lidarrDisabled}
+									class:tooltip-right={lidarrDisabled}
+									class:opacity-40={lidarrDisabled}
+									class:cursor-not-allowed={lidarrDisabled}
+									data-tip={lidarrDisabled ? 'Connect Lidarr in Settings to enable' : 'Requests'}
 								>
 									<div class="relative">
 										<Download class="h-6 w-6" />
@@ -530,42 +566,76 @@
 									<span class="is-drawer-close:hidden">Requests</span>
 								</a>
 							</li>
-						{/if}
-					</ul>
-					<div class="w-full p-2 flex flex-col gap-1" class:pb-24={playerStore.isPlayerVisible}>
-						<div
-							class="is-drawer-close:tooltip is-drawer-close:tooltip-right"
-							data-tip={versionUpdateAvailable ? 'Settings - update available' : 'Settings'}
-						>
-							<a
-								href={versionUpdateAvailable ? '/settings?tab=about' : '/settings'}
-								class="btn btn-ghost btn-circle relative"
-								aria-label={versionUpdateAvailable ? 'Settings - update available' : 'Settings'}
-							>
-								<Settings class="h-6 w-6" />
-								{#if versionUpdateAvailable}
-									<span
-										class="absolute -top-0.5 -right-0.5 flex h-4.5 w-4.5 items-center justify-center rounded-full bg-accent text-accent-content shadow-sm shadow-accent/30"
+
+							{#if authStore.isAdmin}
+								<li>
+									<a
+										href="/requests?tab=approvals"
+										class="is-drawer-close:tooltip is-drawer-close:tooltip-right"
+										data-tip="Approvals"
 									>
-										<ArrowUpCircle class="h-3 w-3" />
-									</span>
-								{/if}
-							</a>
-						</div>
-						<div class="is-drawer-close:tooltip is-drawer-close:tooltip-right" data-tip="Open">
-							<label
-								for="main-drawer"
-								class="btn btn-ghost btn-circle drawer-button is-drawer-open:rotate-y-180"
-							>
-								<PanelLeft class="h-6 w-6" />
-							</label>
+										<div class="relative">
+											<ShieldCheck class="h-6 w-6" />
+											{#if pendingApprovalCountStore.count > 0}
+												<span
+													class="absolute -top-2 -right-2 badge badge-warning badge-xs w-4 h-4 p-0 text-[10px] font-bold"
+													>{pendingApprovalCountStore.count}</span
+												>
+											{/if}
+										</div>
+										<span class="is-drawer-close:hidden">Approvals</span>
+									</a>
+								</li>
+							{/if}
+						</ul>
+						<div class="w-full p-2 flex flex-col gap-1" class:pb-24={playerStore.isPlayerVisible}>
+							{#if authStore.isAdmin}
+								<div
+									class="is-drawer-close:tooltip is-drawer-close:tooltip-right"
+									data-tip={versionUpdateAvailable ? 'Settings - update available' : 'Settings'}
+								>
+									<a
+										href={versionUpdateAvailable ? '/settings?tab=about' : '/settings'}
+										class="btn btn-ghost btn-circle relative"
+										aria-label={versionUpdateAvailable ? 'Settings - update available' : 'Settings'}
+									>
+										<Settings class="h-6 w-6" />
+										{#if versionUpdateAvailable}
+											<span
+												class="absolute -top-0.5 -right-0.5 flex h-4.5 w-4.5 items-center justify-center rounded-full bg-accent text-accent-content shadow-sm shadow-accent/30"
+											>
+												<ArrowUpCircle class="h-3 w-3" />
+											</span>
+										{/if}
+									</a>
+								</div>
+							{/if}
+							<div class="is-drawer-close:tooltip is-drawer-close:tooltip-right" data-tip="Log out">
+								<button
+									onclick={() => void handleLogout()}
+									class="btn btn-ghost btn-circle"
+									aria-label="Log out"
+								>
+									<LogOut class="h-6 w-6" />
+								</button>
+							</div>
+							<div class="is-drawer-close:tooltip is-drawer-close:tooltip-right" data-tip="Open">
+								<label
+									for="main-drawer"
+									class="btn btn-ghost btn-circle drawer-button is-drawer-open:rotate-y-180"
+								>
+									<PanelLeft class="h-6 w-6" />
+								</label>
+							</div>
 						</div>
 					</div>
 				</div>
 			</div>
-		</div>
+		{:else}
+			{@render children()}
+		{/if}
 
-		<nav class="musicseerr-bottom-nav lg:hidden" aria-label="Primary navigation">
+		<nav class="musicseerr-bottom-nav md:hidden" aria-label="Primary navigation">
 			<a
 				href="/"
 				class="musicseerr-bottom-nav__item"
@@ -595,10 +665,13 @@
 				<span>Search</span>
 			</button>
 			<a
-				href="/library"
+				href={lidarrDisabled ? undefined : '/library'}
+				aria-disabled={lidarrDisabled ? 'true' : undefined}
 				class="musicseerr-bottom-nav__item"
-				class:active={isNavActive('/library')}
-				aria-current={isNavActive('/library') ? 'page' : undefined}
+				class:active={!lidarrDisabled && isNavActive('/library')}
+				class:opacity-40={lidarrDisabled}
+				class:pointer-events-none={lidarrDisabled}
+				aria-current={!lidarrDisabled && isNavActive('/library') ? 'page' : undefined}
 			>
 				<Menu />
 				<span>Library</span>

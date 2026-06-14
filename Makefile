@@ -20,6 +20,8 @@ NPM    ?= pnpm
 	backend-test-artist-lock \
 	backend-test-artist-monitoring \
 	backend-test-artist-page \
+	backend-test-artist-releases-dedup \
+	backend-test-artist-discovery \
 	backend-test-audiodb \
 	backend-test-audiodb-parallel \
 	backend-test-audiodb-phase8 \
@@ -45,6 +47,7 @@ NPM    ?= pnpm
 	backend-test-now-playing \
 	backend-test-home-genre \
 	backend-test-infra-hardening \
+	backend-test-memory \
 	backend-test-jellyfin \
 	backend-test-jellyfin-proxy \
 	backend-test-library-pagination \
@@ -77,6 +80,7 @@ NPM    ?= pnpm
 	frontend-format-check frontend-check frontend-lint frontend-test frontend-test-server \
 	frontend-test-album-page \
 	frontend-test-audiodb-images \
+	frontend-test-auth \
 	frontend-test-discover-page \
 	frontend-test-jellyfin \
 	frontend-test-monitored-artists \
@@ -118,6 +122,12 @@ backend-test-artist-monitoring: $(BACKEND_VENV_STAMP) ## Run MUS-15B artist moni
 
 backend-test-artist-page: $(BACKEND_VENV_STAMP) ## Run artist page latency tests (basic route, releases, Last.fm fast path)
 	$(PYTEST) tests/routes/test_artist_basic_route.py tests/routes/test_artist_releases_route.py tests/services/test_artist_basic_info.py tests/services/test_top_albums_lastfm_fast.py -v
+
+backend-test-artist-releases-dedup: $(BACKEND_VENV_STAMP) ## Run artist release de-duplication regressions (each_key_duplicate)
+	$(PYTEST) tests/services/test_categorize_lidarr_albums_dedup.py -v
+
+backend-test-artist-discovery: $(BACKEND_VENV_STAMP) ## Run artist discovery service tests (similar artists, top songs/albums)
+	$(PYTEST) tests/services/test_artist_discovery_service.py -v
 
 backend-test-audiodb: $(BACKEND_VENV_STAMP) ## Run focused AudioDB backend tests
 	$(PYTEST) tests/repositories/test_audiodb_repository.py tests/infrastructure/test_disk_metadata_cache.py tests/services/test_audiodb_image_service.py tests/services/test_artist_audiodb_population.py tests/services/test_album_audiodb_population.py tests/services/test_audiodb_detail_flows.py tests/services/test_search_audiodb_overlay.py
@@ -193,6 +203,9 @@ backend-test-home-genre: $(BACKEND_VENV_STAMP) ## Run home genre decoupling test
 
 backend-test-infra-hardening: $(BACKEND_VENV_STAMP) ## Run infrastructure hardening tests
 	$(PYTEST) tests/infrastructure/test_circuit_breaker_sync.py tests/infrastructure/test_disk_cache_periodic.py tests/infrastructure/test_retry_non_breaking.py
+
+backend-test-memory: $(BACKEND_VENV_STAMP) ## Run process-memory helper + playback bounding tests
+	$(PYTEST) tests/infrastructure/test_memory.py tests/services/test_navidrome_playback_service.py -v
 
 backend-test-jellyfin: $(BACKEND_VENV_STAMP) ## Run all Jellyfin integration backend tests
 	$(PYTEST) tests/repositories/test_jellyfin_playback_url.py tests/services/test_jellyfin_playback_service.py tests/services/test_jellyfin_library_service.py tests/routes/test_stream_routes.py -v
@@ -334,6 +347,9 @@ frontend-test-jellyfin: ## Run Jellyfin frontend tests
 
 frontend-test-discover-page: ## Run discover page and query tests
 	cd "$(FRONTEND_DIR)" && $(NPM) exec vitest run --project server src/lib/queries/discover/DiscoverQuery.spec.ts
+
+frontend-test-auth: ## Run auth query/mutation data-layer tests
+	cd "$(FRONTEND_DIR)" && $(NPM) exec vitest run --project server src/lib/queries/auth/AuthMutations.spec.ts
 
 rebuild: ## Rebuild the application
 	cd "$(ROOT_DIR)" && ./manage.sh --rebuild

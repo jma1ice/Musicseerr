@@ -260,12 +260,22 @@ export type JellyfinConnectionSettings = {
 	api_key: string;
 	user_id: string;
 	enabled: boolean;
+	login_enabled: boolean;
 };
 
 export type ListenBrainzConnectionSettings = {
 	username: string;
 	user_token: string;
 	enabled: boolean;
+};
+
+export type OIDCConnectionSettings = {
+	enabled: boolean;
+	issuer: string;
+	client_id: string;
+	client_secret: string;
+	scopes: string;
+	redirect_uri: string;
 };
 
 export type HomeSettings = {
@@ -778,6 +788,8 @@ export type ActiveRequestItem = {
 	quality?: string | null;
 	protocol?: string | null;
 	download_client?: string | null;
+	user_id?: string | null;
+	requested_by_name?: string | null;
 };
 
 export type RequestHistoryItem = {
@@ -792,6 +804,10 @@ export type RequestHistoryItem = {
 	status: string;
 	in_library: boolean;
 	monitored?: boolean;
+	user_id?: string | null;
+	requested_by_name?: string | null;
+	reviewed_by_name?: string | null;
+	reviewed_at?: string | null;
 };
 
 export type ActiveRequestsResponse = {
@@ -993,6 +1009,7 @@ export type PlexConnectionSettings = {
 	plex_url: string;
 	plex_token: string;
 	enabled: boolean;
+	login_enabled: boolean;
 	music_library_ids: string[];
 	scrobble_to_plex: boolean;
 };
@@ -1121,7 +1138,6 @@ export type PlexHubResponse = {
 	recently_played: PlexAlbumSummary[];
 	recently_added: PlexAlbumSummary[];
 	all_albums_preview: PlexAlbumSummary[];
-	playlists: SourcePlaylistSummary[];
 	genres: string[];
 };
 
@@ -1150,7 +1166,6 @@ export type NavidromeHubResponse = {
 	favorite_artists: NavidromeArtistSummary[];
 	favorite_tracks: NavidromeTrackInfo[];
 	all_albums_preview: NavidromeAlbumSummary[];
-	playlists: SourcePlaylistSummary[];
 	genres: string[];
 };
 
@@ -1162,7 +1177,6 @@ export type JellyfinHubResponse = {
 	most_played_artists: JellyfinArtistSummary[];
 	most_played_albums: JellyfinAlbumSummary[];
 	all_albums_preview: JellyfinAlbumSummary[];
-	playlists: SourcePlaylistSummary[];
 	genres: string[];
 };
 

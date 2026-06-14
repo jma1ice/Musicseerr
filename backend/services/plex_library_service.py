@@ -667,6 +667,7 @@ class PlexLibraryService:
                 album_name=t.parentTitle,
                 album_id=str(t.parentRatingKey) if t.parentRatingKey else "",
                 plex_rating_key=t.ratingKey,
+                part_key=t.Media[0].Part[0].key if (t.Media and t.Media[0].Part) else "",
                 duration_seconds=t.duration // 1000 if t.duration else 0,
                 track_number=t.index,
                 disc_number=t.parentIndex if t.parentIndex else 1,
@@ -711,13 +712,22 @@ class PlexLibraryService:
         track_dicts = []
         failed = 0
         for t in detail.tracks:
+            # The stream proxy keys off the Plex part key (/library/parts/...),
+            # not the rating key - a track without one cannot be played.
+            if not t.part_key:
+                logger.warning(
+                    "Skipping Plex track '%s' (rating key %s) during import: no streamable part",
+                    t.track_name, t.plex_rating_key,
+                )
+                failed += 1
+                continue
             try:
                 track_dicts.append({
                     "track_name": t.track_name,
                     "artist_name": t.artist_name,
                     "album_name": t.album_name,
                     "duration": t.duration_seconds,
-                    "track_source_id": t.id,
+                    "track_source_id": t.part_key,
                     "source_type": "plex",
                     "album_id": t.album_id,
                     "plex_rating_key": t.plex_rating_key,
@@ -814,7 +824,6 @@ class PlexLibraryService:
             asyncio.wait_for(self.get_albums(size=12), timeout=_HUB_TIMEOUT),
             asyncio.wait_for(self.get_stats(), timeout=_HUB_TIMEOUT),
             asyncio.wait_for(self.get_recently_added_albums(limit=20), timeout=_HUB_TIMEOUT),
-            asyncio.wait_for(self.list_playlists(limit=20), timeout=_HUB_TIMEOUT),
             asyncio.wait_for(self.get_genres(), timeout=_HUB_TIMEOUT),
             return_exceptions=True,
         )
@@ -842,20 +851,15 @@ class PlexLibraryService:
         if isinstance(results[3], BaseException):
             logger.warning("Hub: get_recently_added_albums failed: %s", results[3])
 
-        playlists = results[4] if not isinstance(results[4], BaseException) else []
+        genres = results[4] if not isinstance(results[4], BaseException) else []
         if isinstance(results[4], BaseException):
-            logger.warning("Hub: list_playlists failed: %s", results[4])
-
-        genres = results[5] if not isinstance(results[5], BaseException) else []
-        if isinstance(results[5], BaseException):
-            logger.warning("Hub: get_genres failed: %s", results[5])
+            logger.warning("Hub: get_genres failed: %s", results[4])
 
         return PlexHubResponse(
             stats=stats,
             recently_played=recently_played,
             recently_added=recently_added,
             all_albums_preview=all_albums_preview,
-            playlists=playlists,
             genres=genres,
         )
 
