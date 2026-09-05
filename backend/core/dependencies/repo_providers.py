@@ -36,6 +36,17 @@ def get_lidarr_repository() -> "LidarrRepository":
     from repositories.lidarr import LidarrRepository
 
     settings = get_settings()
+
+    # Hydrate Lidarr settings from persisted preferences on startup.
+    # save_lidarr_connection() updates these fields in memory, but without
+    # this step a fresh process starts with only the static/default values.
+    lidarr_settings = get_preferences_service().get_lidarr_connection()
+    settings.lidarr_url = lidarr_settings.lidarr_url
+    settings.lidarr_api_key = lidarr_settings.lidarr_api_key
+    settings.quality_profile_id = lidarr_settings.quality_profile_id
+    settings.metadata_profile_id = lidarr_settings.metadata_profile_id
+    settings.root_folder_path = lidarr_settings.root_folder_path
+
     cache = get_cache()
     http_client = _get_configured_http_client()
     request_history_store = get_request_history_store()
